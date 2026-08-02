@@ -1,5 +1,5 @@
 use bigint::{U256, U512};
-use bigint::math::extended_gcd;
+use bigint::math::mod_inv;
 use std::ops::{Add, Sub, Mul, Div, Neg};
 use std::marker::PhantomData;
 
@@ -62,20 +62,10 @@ impl<C: FpConfig> Mul for Fp<C> {
 }
 
 impl<C: FpConfig> Fp<C> {
-    // Multiplicative inverse mod C::MODULUS, via the extended Euclidean algorithm.
-    // ax + bp == ax == 1 mod p where p is prime
     pub fn inverse(self) -> Self {
         assert!(self.value != U256::ZERO, "cannot invert zero in a field");
 
-        let egcd = extended_gcd(self.value, C::MODULUS);
-
-        let inv = if egcd.x_neg {
-            C::MODULUS - egcd.x
-        } else {
-            egcd.x
-        };
-
-        Fp::new(inv)
+        Fp::new(mod_inv(self.value, C::MODULUS))
     }
 }
 

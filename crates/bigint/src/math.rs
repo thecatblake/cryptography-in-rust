@@ -92,6 +92,17 @@ pub fn extended_gcd<const N: usize>(a: Uint<N>, b: Uint<N>) -> ExtendedGcd<N> {
     ExtendedGcd { gcd: old_r, x, x_neg, y, y_neg }
 }
 
+// Multiplicative inverse mod C::MODULUS, via the extended Euclidean algorithm.
+// ax + bp == ax == 1 mod p where p is prime
+pub fn mod_inv<const N: usize>(a: Uint<N>, n: Uint<N>) -> Uint<N> {
+    let ext = extended_gcd(a, n);
+    if ext.x_neg {
+        n - ext.x
+    } else {
+        ext.x
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +203,28 @@ mod tests {
         assert!(r.y_neg);
     }
 
+    #[test]
+    fn mod_inv_3_11() {
+        assert_eq!(mod_inv(U256::from(3), U256::from(11)), U256::from(4));
+    }
+
+    #[test]
+    fn mod_inv_one() {
+        assert_eq!(mod_inv(U256::from(1), U256::from(7)), U256::from(1));
+    }
+
+    #[test]
+    fn mod_inv_rsa_example() {
+        // e = 17, phi = 3120 -> d = 2753 (17 * 2753 = 46801 = 15*3120 + 1)
+        assert_eq!(mod_inv(U256::from(17), U256::from(3120)), U256::from(2753));
+    }
+
+    #[test]
+    fn mod_inv_reduces_a_greater_than_n() {
+        // 40 mod 7 = 5, and 5 * 3 = 15 = 1 mod 7
+        assert_eq!(mod_inv(U256::from(40), U256::from(7)), U256::from(3));
+    }
+
     proptest! {
         #[test]
         fn gcd_commutative(a in any::<u64>(), b in any::<u64>()) {
@@ -243,6 +276,16 @@ mod tests {
             let by = signed(ub, false) as i128 * signed(r.y, r.y_neg);
 
             prop_assert_eq!(ax + by, r.gcd.low_u64() as i128);
+        }
+
+        #[test]
+        fn mod_inv_is_multiplicative_inverse(a in 1u64.., n in 2u64..) {
+            prop_assume!(gcd_u64(a, n) == 1);
+
+            let inv = mod_inv(U256::from(a), U256::from(n));
+
+            prop_assert!(inv < U256::from(n));
+            prop_assert_eq!((a as u128 * inv.low_u64() as u128) % (n as u128), 1);
         }
     }
 }
