@@ -2,6 +2,8 @@ use std::ops::{Index, Add, Sub, Mul, Div, Rem, AddAssign, SubAssign, Shl, ShlAss
 
 use std::cmp::Ordering;
 
+pub mod math;
+
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
 pub struct Uint<const N: usize>{
     limbs: [u64; N],
