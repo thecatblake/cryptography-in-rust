@@ -1,11 +1,22 @@
-use std::ops::{Index, Add, Sub, Mul};
+use std::ops::{Index, Add, Sub, Mul, Div, AddAssign, SubAssign, Shl, ShlAssign, Shr, ShrAssign};
+
+use std::cmp::Ordering;
 
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
 pub struct Uint<const N: usize>{
     limbs: [u64; N],
 }
 
+pub type U256 = Uint<4>;
+pub type U512 = Uint<8>;
+
 impl<const N: usize> Uint<N> {
+    pub const ONE: Self = {
+        let mut limbs = [0; N];
+        limbs[0] = 1;
+        Self { limbs }
+    };
+
     pub const fn low_u64(&self) -> u64 {
         self.limbs[0]
     }
@@ -13,10 +24,51 @@ impl<const N: usize> Uint<N> {
     pub fn low_u128(&self) -> u128 {
         ((self[1] as u128) << 64) | (self[0] as u128)
     }
+    
+    pub fn bit(&self, i: usize) -> bool {
+        let limb = i / 64;
+        let offset = i % 64;
+
+        ((self[limb] >> offset) & 1) == 1
+    }
+
+    pub fn set_bit(&mut self, i: usize) {
+        let limb = i / 64;
+        let offset = i % 64;
+
+        self.limbs[limb] |= 1 << offset;
+    }
+
+    pub fn bits(&self) -> usize {
+        for limb in (0..N).rev() {
+            let x = self.limbs[limb];
+            if x != 0 {
+                return limb * 64 + (63 - x.leading_zeros() as usize);
+            }
+        }
+        0
+    }
 }
 
-pub type U256 = Uint<4>;
-pub type U512 = Uint<8>;
+
+impl<const N: usize> Ord for Uint<N> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for i in (0..N).rev() {
+            match self.limbs[i].cmp(&other.limbs[i]) {
+                Ordering::Equal => continue,
+                ord => return ord,
+            }
+        }
+
+        Ordering::Equal
+    }
+}
+
+impl<const N: usize> PartialOrd for Uint<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl<const N: usize> Uint<N> {
     pub const ZERO: Self = Self { limbs: [0; N] };
@@ -61,6 +113,12 @@ impl<const N:usize> Add for Uint<N> {
     }
 }
 
+impl<const N: usize> AddAssign for Uint<N> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
 impl<const N:usize> Sub for Uint<N> {
     type Output = Self;
 
@@ -76,6 +134,12 @@ impl<const N:usize> Sub for Uint<N> {
         }
 
         Uint { limbs: result }
+    }
+}
+
+impl<const N: usize> SubAssign for Uint<N> {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
     }
 }
 
@@ -96,6 +160,102 @@ impl Mul for U256 {
         }
 
         U512 { limbs: result }
+    }
+}
+
+impl<const N: usize> Shl<usize> for Uint<N> {
+    type Output = Self;
+
+    fn shl(self, rhs: usize) -> Self::Output {
+        assert!(rhs < 64);
+
+        let mut result = [0u64; N];
+        let mut carry = 0u64;
+
+        for i in 0..N {
+            let new_carry = if rhs == 0 {
+                0
+            } else {
+                self[i] >> (64 - rhs)
+            };
+
+            result[i] = (self[i] << rhs) | carry;
+            carry = new_carry;
+        }
+
+        Uint { limbs: result }
+    }
+}
+
+impl<const N: usize> ShlAssign<usize> for Uint<N> {
+    fn shl_assign(&mut self, rhs: usize) {
+        *self = *self << rhs;
+    }
+}
+
+impl<const N: usize> Shr<usize> for Uint<N> {
+    type Output = Self;
+
+    fn shr(self, rhs: usize) -> Self::Output {
+        assert!(rhs < 64);
+
+        let mut result = [0u64; N];
+        let mut carry = 0u64;
+
+        for i in (0..N).rev() {
+            let new_carry = if rhs == 0 {
+                0
+            } else {
+                self[i] << (64 - rhs)
+            };
+
+            result[i] = (self[i] >> rhs) | carry;
+            carry = new_carry;
+        }
+
+        Uint { limbs: result }
+    }
+}
+
+impl<const N: usize> ShrAssign<usize> for Uint<N> {
+    fn shr_assign(&mut self, rhs: usize) {
+        *self = *self >> rhs;
+    }
+}
+
+impl<const N: usize> Div for Uint<N> {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        assert!(rhs != Self::ZERO);
+
+        if self < rhs {
+            return Uint::ZERO;
+        }
+
+        if self == rhs {
+            return Uint::ONE;
+        }
+
+        let mut dividend = self;
+        let mut divisor = rhs;
+
+        let mut quotient = Self::ZERO;
+
+        let shift = dividend.bits() - divisor.bits();
+
+        divisor <<= shift;
+
+        for i in (0..=shift).rev() {
+            if dividend >= divisor {
+                dividend -= divisor;
+                quotient.set_bit(i);
+            }
+
+            divisor >>= 1;
+        }
+
+        quotient
     }
 }
 
@@ -224,6 +384,47 @@ mod tests {
             let result = ua * ub;
 
             assert_eq!(result.low_u128(), expected);
+        }
+
+        #[test]
+        fn div_by_one(a in any::<u64>()) {
+            let ua = U256::from(a);
+            let one = U256::from(1);
+
+            prop_assert_eq!(ua / one, ua);
+        }
+
+        #[test]
+        fn div_self(a in any::<u64>()) {
+            prop_assume!(a != 0);
+
+            let ua = U256::from(a);
+
+            prop_assert_eq!(ua / ua, U256::ONE);
+        }
+
+        #[test]
+        fn zero_div(a in any::<u64>()) {
+            prop_assume!(a != 0);
+
+            let ua = U256::from(a);
+
+            prop_assert_eq!(U256::ZERO / ua, U256::ZERO);
+        }
+
+        #[test]
+        fn div_matches_u64(a in any::<u64>(), b in any::<u64>()) {
+            prop_assume!(b != 0);
+
+            let ua = U256::from(a);
+            let ub = U256::from(b);
+
+            let expected = a / b;
+
+            prop_assert_eq!(
+                (ua / ub).low_u64(),
+                expected
+            );
         }
     }
 }
