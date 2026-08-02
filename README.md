@@ -6,12 +6,12 @@ This project is an ongoing personal journey to deepen my understanding of modern
 
 * [ ] Implement `BigInt`
 
-  * [ ] Addition
-  * [ ] Subtraction
-  * [ ] Multiplication
-  * [ ] Division
-  * [ ] Modulo
-  * [ ] Comparison
+  * [x] Addition
+  * [x] Subtraction
+  * [x] Multiplication
+  * [x] Division
+  * [x] Modulo
+  * [x] Comparison
   * [ ] GCD / Extended GCD
   * [ ] Modular Inverse
   * [ ] Montgomery Reduction
