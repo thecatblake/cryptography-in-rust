@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+proptest  = "1"
+criterion = "0.5"
+rayon     = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
