@@ -12,7 +12,7 @@ This project is an ongoing personal journey to deepen my understanding of modern
   * [x] Division
   * [x] Modulo
   * [x] Comparison
-  * [ ] GCD / Extended GCD
+  * [x] GCD / Extended GCD
   * [ ] Modular Inverse
   * [ ] Montgomery Reduction
   * [ ] Barrett Reduction
