@@ -23,10 +23,30 @@ impl<const N: usize> Uint<N> {
         self.limbs[0]
     }
 
+    pub const fn from_u64(value: u64) -> Self {
+        let mut limbs = [0u64; N];
+
+        if N > 0 {
+            limbs[0] = value;
+        }
+
+        Self { limbs }
+    }
+
     pub fn low_u128(&self) -> u128 {
         ((self[1] as u128) << 64) | (self[0] as u128)
     }
-    
+
+    // Zero-extends into a wider width, or truncates the high limbs when narrowing.
+    pub fn resize<const M: usize>(&self) -> Uint<M> {
+        let mut limbs = [0u64; M];
+        let len = N.min(M);
+
+        limbs[..len].copy_from_slice(&self.limbs[..len]);
+
+        Uint { limbs }
+    }
+
     pub fn bit(&self, i: usize) -> bool {
         let limb = i / 64;
         let offset = i % 64;
@@ -78,13 +98,7 @@ impl<const N: usize> Uint<N> {
 
 impl<const N: usize> From<u64> for Uint<N> {
     fn from(value: u64) -> Self {
-        let mut limbs = [0u64; N];
-
-        if N > 0 {
-            limbs[0] = value;
-        }
-
-        Self { limbs }
+        Self::from_u64(value)
     }
 }
 

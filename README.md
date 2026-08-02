@@ -23,11 +23,11 @@ This project is an ongoing personal journey to deepen my understanding of modern
 
 * [ ] Prime Field (`Fp`)
 
-  * [ ] Addition
-  * [ ] Subtraction
-  * [ ] Multiplication
-  * [ ] Division
-  * [ ] Negation
+  * [x] Addition
+  * [x] Subtraction
+  * [x] Multiplication
+  * [x] Division
+  * [x] Negation
   * [ ] Inversion
   * [ ] Exponentiation (`pow`)
   * [ ] Squaring
