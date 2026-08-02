@@ -31,13 +31,6 @@ The less you use AI, the more you need time to complete.
 * [ ] ◇ Toom–Cook multiplication
 * [ ] Fixed-width limb representation (`u64` limbs, carry handling)
 
-## Randomness
-
-* [ ] CSPRNG interface (`rand_core`-style traits)
-* [ ] Rejection sampling for uniform field elements
-* [ ] Deterministic nonce generation (RFC 6979)
-* [ ] Hash-to-field (RFC 9380)
-
 ---
 
 # Phase 1 — Finite Fields
@@ -192,6 +185,13 @@ The less you use AI, the more you need time to complete.
 ---
 
 # Phase 4 — Classical Public-Key Cryptography
+
+## Randomness
+
+* [ ] CSPRNG interface (`rand_core`-style traits)
+* [ ] Rejection sampling for uniform field elements
+* [ ] Deterministic nonce generation (RFC 6979)
+* [ ] Hash-to-field (RFC 9380)
 
 ## Signatures
 
