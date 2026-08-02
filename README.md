@@ -21,7 +21,7 @@ The less you use AI, the more you need time to complete.
 * [x] Modulo
 * [x] Comparison
 * [x] GCD / Extended GCD
-* [ ] Modular Inverse
+* [x] Modular Inverse
 * [ ] Montgomery Reduction
 * [ ] Barrett Reduction
 * [ ] Modular Exponentiation
