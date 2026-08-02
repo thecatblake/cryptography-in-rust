@@ -1,4 +1,4 @@
-use std::ops::{Index, Add, Sub, Mul, Div, AddAssign, SubAssign, Shl, ShlAssign, Shr, ShrAssign};
+use std::ops::{Index, Add, Sub, Mul, Div, Rem, AddAssign, SubAssign, Shl, ShlAssign, Shr, ShrAssign};
 
 use std::cmp::Ordering;
 
@@ -223,18 +223,16 @@ impl<const N: usize> ShrAssign<usize> for Uint<N> {
     }
 }
 
-impl<const N: usize> Div for Uint<N> {
-    type Output = Self;
-
-    fn div(self, rhs: Self) -> Self::Output {
+impl<const N: usize> Uint<N> {
+    pub fn div_rem(self, rhs: Self) -> (Self, Self) {
         assert!(rhs != Self::ZERO);
 
         if self < rhs {
-            return Uint::ZERO;
+            return (Self::ZERO, self);
         }
 
         if self == rhs {
-            return Uint::ONE;
+            return (Self::ONE, Self::ZERO);
         }
 
         let mut dividend = self;
@@ -255,7 +253,23 @@ impl<const N: usize> Div for Uint<N> {
             divisor >>= 1;
         }
 
-        quotient
+        (quotient, dividend)
+    }
+}
+
+impl<const N: usize> Div for Uint<N> {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        self.div_rem(rhs).0
+    }
+}
+
+impl<const N: usize> Rem for Uint<N> {
+    type Output = Self;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        self.div_rem(rhs).1
     }
 }
 
@@ -425,6 +439,43 @@ mod tests {
                 (ua / ub).low_u64(),
                 expected
             );
+        }
+
+        #[test]
+        fn rem_matches_u64(a in any::<u64>(), b in any::<u64>()) {
+            prop_assume!(b != 0);
+
+            let ua = U256::from(a);
+            let ub = U256::from(b);
+
+            let expected = a % b;
+
+            prop_assert_eq!(
+                (ua % ub).low_u64(),
+                expected
+            );
+        }
+
+        #[test]
+        fn rem_zero(a in any::<u64>()) {
+            prop_assume!(a != 0);
+
+            let ua = U256::from(a);
+
+            prop_assert_eq!(ua % ua, U256::ZERO);
+        }
+
+        #[test]
+        fn div_rem_roundtrip(a in any::<u64>(), b in any::<u64>()) {
+            prop_assume!(b != 0);
+
+            let ua = U256::from(a);
+            let ub = U256::from(b);
+
+            let (q, r) = ua.div_rem(ub);
+
+            prop_assert_eq!(q * ub + U512::from(r.low_u64()), U512::from(a));
+            prop_assert!(r < ub);
         }
     }
 }
