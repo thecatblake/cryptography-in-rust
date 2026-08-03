@@ -6,9 +6,9 @@ An ongoing personal journey to deepen my understanding of modern cryptography by
 
 ---
 
-# AI
-The more you use AI, the less you find your lack of knowledge, and unknown unknown.
-The less you use AI, the more you need time to complete.
+# My View on AI (for Learners)
+The more you rely on AI, the less often you discover what you don't know—your unknown unknowns.
+The less you rely on AI, the slower your work becomes, but the more opportunities you have to uncover gaps in your understanding.
 
 # Phase 0 — Core Mathematics
 
