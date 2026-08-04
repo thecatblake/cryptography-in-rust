@@ -33,6 +33,10 @@ impl<const N: usize> Uint<N> {
         Self { limbs }
     }
 
+    pub const fn from_limbs(limbs: [u64; N]) -> Self {
+        Self { limbs }
+    }
+
     pub fn low_u128(&self) -> u128 {
         ((self[1] as u128) << 64) | (self[0] as u128)
     }
@@ -163,19 +167,24 @@ impl Mul for U256 {
     type Output = U512;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [0u64; 8];
+        let mut result = U512::ZERO;
 
         for i in 0..4 {
-            for j in 0..4 {
-                let mul = self[i] as u128
-                    * rhs[j] as u128;
+            let mut row = [0u64; 8];
+            let mut carry = 0u64;
 
-                result[i + j] += mul as u64;
-                result[i + j + 1] += (mul >> 64) as u64;
+            for j in 0..4 {
+                let sum = self[i] as u128 * rhs[j] as u128 + carry as u128;
+
+                row[i + j] = sum as u64;
+                carry = (sum >> 64) as u64;
             }
+            row[i + 4] = carry;
+
+            result = result + U512 { limbs: row };
         }
 
-        U512 { limbs: result }
+        result
     }
 }
 
@@ -415,7 +424,31 @@ mod tests {
 
             assert_eq!(result.low_u128(), expected);
         }
+    }
 
+    #[test]
+    fn mul_propagates_carries_across_limbs() {
+        // (2^256 - 1) * 2 = 2^257 - 2, which requires a carry to ripple
+        // through every limb of the low half and into the high half.
+        // The old accumulate-without-carry Mul impl overflowed a limb here.
+        let all_ones = U256::from_limbs([u64::MAX; 4]);
+        let two = U256::from_u64(2);
+
+        let expected = U512::from_limbs([
+            u64::MAX - 1,
+            u64::MAX,
+            u64::MAX,
+            u64::MAX,
+            1,
+            0,
+            0,
+            0,
+        ]);
+
+        assert_eq!(all_ones * two, expected);
+    }
+
+    proptest! {
         #[test]
         fn div_by_one(a in any::<u64>()) {
             let ua = U256::from(a);

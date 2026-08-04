@@ -1,4 +1,4 @@
-use bigint::{U256, U512};
+use bigint::{U256, U512, Uint};
 use bigint::math::mod_inv;
 use std::ops::{Add, Sub, Mul, Div, Neg};
 use std::marker::PhantomData;
@@ -7,69 +7,199 @@ use std::marker::PhantomData;
 // This makes field elements with different moduli different Rust types,
 // and we can impose the operation under the same modulus at the compile time
 
+// We need to separate the computation at compile time and runtime.
+// Calculation methods are determined at compile time.
+// The actual value is determined at runtime.
+// So Fp holds a value and template type T for Fp holds calculation methods and template type for T holds constants.
+
+
 pub trait FpConfig {
     const MODULUS: U256;
 }
 
-pub struct Fp<C: FpConfig> {
-    value: bigint::U256,
-    _marker: PhantomData<C>
+pub trait FpMontConfig {
+    const MODULUS: U256;
+    const R2: U256;
+    const N_PRIME: U256;
 }
 
-impl<C: FpConfig> Fp<C> {
+// Scratch width for REDC's T + m*MODULUS step: both terms are < R*MODULUS < 2^512,
+// so their sum can briefly need one bit more than U512 holds.
+type Wide = Uint<9>;
+
+pub trait FpBackend {
+    const MODULUS: U256;
+
+    fn add(a: U256, b: U256) -> U256;
+    fn sub(a: U256, b: U256) -> U256;
+    fn mul(a: U256, b: U256) -> U256;
+    fn neg(a: U256) -> U256;
+    fn inverse(a: U256) -> U256;
+}
+
+pub struct DefaultBackend<T: FpConfig>(PhantomData<T>);
+pub struct MontBackend<T: FpMontConfig>(PhantomData<T>);
+
+impl<T: FpConfig> FpBackend for DefaultBackend<T> {
+    const MODULUS: U256 = T::MODULUS;
+
+    fn add(a: U256, b: U256) -> U256 {
+        let mut sum = a + b;
+
+        if sum >= Self::MODULUS {
+            sum -= Self::MODULUS;
+        }
+
+        sum
+    }
+
+    fn sub(a: U256, b: U256) -> U256 {
+        if a >= b {
+            a - b
+        } else {
+            (a + Self::MODULUS) - b
+        }
+    }
+
+    fn mul(a: U256, b: U256) -> U256 {
+        let product: U512 = a * b;
+        let modulus: U512 = Self::MODULUS.resize();
+
+        (product % modulus).resize()
+    }
+
+    fn neg(a: U256) -> U256 {
+        if a == U256::ZERO {
+            U256::ZERO
+        } else {
+            Self::MODULUS - a
+        }
+    }
+
+    fn inverse(a: U256) -> U256 {
+        assert!(a != U256::ZERO, "cannot invert zero in a field");
+
+        mod_inv(a, Self::MODULUS)
+    }
+}
+
+impl<T: FpMontConfig> MontBackend<T> {
+    // REDC(t) = t * R^-1 mod MODULUS, computed without dividing by MODULUS.
+    // Requires t < R * MODULUS, which holds for any t formed by multiplying
+    // two values already reduced mod MODULUS.
+    fn redc(t: U512) -> U256 {
+        let t_low: U256 = t.resize();
+        let m: U256 = (t_low * T::N_PRIME).resize();
+
+        // t + m * MODULUS is guaranteed divisible by R (2^256) by construction of m.
+        let sum: Wide = t.resize() + (m * T::MODULUS).resize();
+
+        // Divide by R = 2^256 (i.e. drop the low 256 bits) via chained shifts,
+        // since a single shift is limited to 63 bits at a time.
+        let quotient: Wide = sum >> 63 >> 63 >> 63 >> 63 >> 4;
+
+        let modulus_wide: Wide = T::MODULUS.resize();
+        let reduced = if quotient >= modulus_wide {
+            quotient - modulus_wide
+        } else {
+            quotient
+        };
+
+        reduced.resize()
+    }
+
+    fn to_mont(a: U256) -> U256 {
+        Self::redc(a * T::R2)
+    }
+
+    fn from_mont(a: U256) -> U256 {
+        Self::redc(a.resize())
+    }
+}
+
+impl<T: FpMontConfig> FpBackend for MontBackend<T> {
+    const MODULUS: U256 = T::MODULUS;
+
+    fn add(a: U256, b: U256) -> U256 {
+        let mut sum = a + b;
+
+        if sum >= Self::MODULUS {
+            sum -= Self::MODULUS;
+        }
+
+        sum
+    }
+
+    fn sub(a: U256, b: U256) -> U256 {
+        if a >= b {
+            a - b
+        } else {
+            (a + Self::MODULUS) - b
+        }
+    }
+
+    fn mul(a: U256, b: U256) -> U256 {
+        Self::redc(a * b)
+    }
+
+    fn neg(a: U256) -> U256 {
+        if a == U256::ZERO {
+            U256::ZERO
+        } else {
+            Self::MODULUS - a
+        }
+    }
+
+    fn inverse(a: U256) -> U256 {
+        assert!(a != U256::ZERO, "cannot invert zero in a field");
+
+        let plain = Self::from_mont(a);
+        let inv = mod_inv(plain, Self::MODULUS);
+
+        Self::to_mont(inv)
+    }
+}
+
+pub struct Fp<B: FpBackend> {
+    value: bigint::U256,
+    _marker: PhantomData<B>
+}
+
+impl<B: FpBackend> Fp<B> {
     pub fn new(value: bigint::U256) -> Self {
         Fp { value, _marker: PhantomData }
     }
+
+    pub fn inverse(self) -> Self {
+        Fp::new(B::inverse(self.value))
+    }
 }
 
-impl<C: FpConfig> Add for Fp<C> {
+impl<B: FpBackend> Add for Fp<B> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let mut sum = self.value + rhs.value;
-
-        if sum >= C::MODULUS {
-            sum -= C::MODULUS;
-        }
-
-        Fp::new(sum)
+        Fp::new(B::add(self.value, rhs.value))
     }
 }
 
-impl<C: FpConfig> Sub for Fp<C> {
+impl<B: FpBackend> Sub for Fp<B> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        let diff = if self.value >= rhs.value {
-            self.value - rhs.value
-        } else {
-            (self.value + C::MODULUS) - rhs.value
-        };
-
-        Fp::new(diff)
+        Fp::new(B::sub(self.value, rhs.value))
     }
 }
 
-impl<C: FpConfig> Mul for Fp<C> {
+impl<B: FpBackend> Mul for Fp<B> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let product: U512 = self.value * rhs.value;
-        let modulus: U512 = C::MODULUS.resize();
-
-        Fp::new((product % modulus).resize())
+        Fp::new(B::mul(self.value, rhs.value))
     }
 }
 
-impl<C: FpConfig> Fp<C> {
-    pub fn inverse(self) -> Self {
-        assert!(self.value != U256::ZERO, "cannot invert zero in a field");
-
-        Fp::new(mod_inv(self.value, C::MODULUS))
-    }
-}
-
-impl<C: FpConfig> Div for Fp<C> {
+impl<B: FpBackend> Div for Fp<B> {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
@@ -77,17 +207,11 @@ impl<C: FpConfig> Div for Fp<C> {
     }
 }
 
-impl<C: FpConfig> Neg for Fp<C> {
+impl<B: FpBackend> Neg for Fp<B> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        let value = if self.value == U256::ZERO {
-            U256::ZERO
-        } else {
-            C::MODULUS - self.value
-        };
-
-        Fp::new(value)
+        Fp::new(B::neg(self.value))
     }
 }
 
@@ -101,7 +225,7 @@ mod tests {
         const MODULUS: U256 = U256::from_u64(17);
     }
 
-    type F17 = Fp<Mod17>;
+    type F17 = Fp<DefaultBackend<Mod17>>;
 
     fn fe(v: u64) -> F17 {
         F17::new(U256::from(v % 17))
@@ -267,4 +391,70 @@ mod tests {
             prop_assert_eq!((-fe(a)).value, (fe(0) - fe(a)).value);
         }
     }
+
+    // If all the tests for DefaultBackend passes and the computation using the MontBackend and the one using DefaultBackend matches MontBackend passes all the tests intended.
+    struct Mod17Mont;
+    impl FpMontConfig for Mod17Mont {
+        const MODULUS: U256 = U256::from_u64(17);
+        // R = 2^256; ord(2 mod 17) = 8 and 8 | 256, so 2^256 ≡ 1 (mod 17) and R2 = 1.
+        const R2: U256 = U256::from_u64(1);
+        // -17^-1 mod 2^256, via the 2-adic Newton iteration (mirrors the classic
+        // "17 * 0x0F...0F ≡ -1" byte-wise pattern extended to all 256 bits).
+        const N_PRIME: U256 = U256::from_limbs([
+            0x0F0F0F0F0F0F0F0F,
+            0x0F0F0F0F0F0F0F0F,
+            0x0F0F0F0F0F0F0F0F,
+            0x0F0F0F0F0F0F0F0F,
+        ]);
+    }
+
+    type MB17 = MontBackend<Mod17Mont>;
+    type F17Mont = Fp<MB17>;
+
+    fn fe_mont(v: u64) -> F17Mont {
+        F17Mont::new(MB17::to_mont(U256::from(v % 17)))
+    }
+
+    fn canonical(x: F17Mont) -> U256 {
+        MB17::from_mont(x.value)
+    }
+
+    proptest! {
+        #[test]
+        fn mont_roundtrip_is_identity(a in 0u64..17) {
+            let x = U256::from(a);
+            prop_assert_eq!(MB17::from_mont(MB17::to_mont(x)), x);
+        }
+
+        #[test]
+        fn mont_add_matches_default(a in 0u64..17, b in 0u64..17) {
+            prop_assert_eq!(canonical(fe_mont(a) + fe_mont(b)), (fe(a) + fe(b)).value);
+        }
+
+        #[test]
+        fn mont_sub_matches_default(a in 0u64..17, b in 0u64..17) {
+            prop_assert_eq!(canonical(fe_mont(a) - fe_mont(b)), (fe(a) - fe(b)).value);
+        }
+
+        #[test]
+        fn mont_mul_matches_default(a in 0u64..17, b in 0u64..17) {
+            prop_assert_eq!(canonical(fe_mont(a) * fe_mont(b)), (fe(a) * fe(b)).value);
+        }
+
+        #[test]
+        fn mont_neg_matches_default(a in 0u64..17) {
+            prop_assert_eq!(canonical(-fe_mont(a)), (-fe(a)).value);
+        }
+
+        #[test]
+        fn mont_inverse_matches_default(a in 1u64..17) {
+            prop_assert_eq!(canonical(fe_mont(a).inverse()), fe(a).inverse().value);
+        }
+
+        #[test]
+        fn mont_div_matches_default(a in 0u64..17, b in 1u64..17) {
+            prop_assert_eq!(canonical(fe_mont(a) / fe_mont(b)), (fe(a) / fe(b)).value);
+        }
+    }
+
 }
