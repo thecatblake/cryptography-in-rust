@@ -22,7 +22,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [x] Comparison
 * [x] GCD / Extended GCD
 * [x] Modular Inverse
-* [ ] Montgomery Reduction
+* [x] Montgomery Reduction
 * [ ] Barrett Reduction
 * [ ] Modular Exponentiation
 * [ ] Miller–Rabin Primality Test
@@ -42,7 +42,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [x] Multiplication
 * [x] Division
 * [x] Negation
-* [ ] Inversion
+* [x] Inversion
 * [ ] Exponentiation (`pow`)
 * [ ] Squaring
 * [ ] Square Root (Tonelli–Shanks)
