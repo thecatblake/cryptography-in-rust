@@ -188,6 +188,26 @@ impl Mul for U256 {
     }
 }
 
+impl U256 {
+    // Square-and-multiply, wrapping mod 2^256 (matches the widening Mul
+    // above, truncated back down via resize on each step).
+    pub fn pow(self, exp: Self) -> Self {
+        let mut result = Self::ONE;
+        let mut base = self;
+        let mut e = exp;
+
+        while e != Self::ZERO {
+            if e.bit(0) {
+                result = (result * base).resize();
+            }
+            base = (base * base).resize();
+            e >>= 1;
+        }
+
+        result
+    }
+}
+
 impl<const N: usize> Shl<usize> for Uint<N> {
     type Output = Self;
 
@@ -525,6 +545,50 @@ mod tests {
 
             prop_assert_eq!(q * ub + U512::from(r.low_u64()), U512::from(a));
             prop_assert!(r < ub);
+        }
+    }
+
+    #[test]
+    fn pow_zero_exponent_is_one() {
+        assert_eq!(U256::from(5).pow(U256::ZERO), U256::ONE);
+    }
+
+    #[test]
+    fn pow_zero_base_is_zero() {
+        assert_eq!(U256::ZERO.pow(U256::from(5)), U256::ZERO);
+    }
+
+    #[test]
+    fn pow_one_exponent_is_self() {
+        let a = U256::from(12345);
+        assert_eq!(a.pow(U256::ONE), a);
+    }
+
+    #[test]
+    fn pow_wraps_mod_2_256() {
+        // 2^256 == 0 (mod 2^256), matching wrapping semantics.
+        assert_eq!(U256::from(2).pow(U256::from(256)), U256::ZERO);
+    }
+
+    proptest! {
+        #[test]
+        fn pow_matches_u64_when_no_overflow(base in 0u64..1000, exp in 0u32..5) {
+            let ua = U256::from(base);
+            let expected = base.pow(exp);
+
+            prop_assert_eq!(ua.pow(U256::from(exp as u64)).low_u64(), expected);
+        }
+
+        #[test]
+        fn pow_matches_repeated_mul(base in any::<u64>(), exp in 0u32..12) {
+            let ua = U256::from(base);
+
+            let mut expected = U256::ONE;
+            for _ in 0..exp {
+                expected = (expected * ua).resize();
+            }
+
+            prop_assert_eq!(ua.pow(U256::from(exp as u64)), expected);
         }
     }
 }

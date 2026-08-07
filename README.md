@@ -43,7 +43,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [x] Division
 * [x] Negation
 * [x] Inversion
-* [ ] Exponentiation (`pow`)
+* [x] Exponentiation (`pow`)
 * [ ] Squaring
 * [ ] Square Root (Tonelli–Shanks)
 * [ ] Legendre symbol / quadratic residuosity

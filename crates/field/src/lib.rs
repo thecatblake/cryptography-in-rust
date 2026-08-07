@@ -35,6 +35,9 @@ pub trait FpBackend {
     fn mul(a: U256, b: U256) -> U256;
     fn neg(a: U256) -> U256;
     fn inverse(a: U256) -> U256;
+    // The multiplicative identity in this backend's representation
+    // (plain 1 for DefaultBackend, R mod MODULUS for MontBackend).
+    fn one() -> U256;
 }
 
 pub struct DefaultBackend<T: FpConfig>(PhantomData<T>);
@@ -80,6 +83,10 @@ impl<T: FpConfig> FpBackend for DefaultBackend<T> {
         assert!(a != U256::ZERO, "cannot invert zero in a field");
 
         mod_inv(a, Self::MODULUS)
+    }
+
+    fn one() -> U256 {
+        U256::ONE
     }
 }
 
@@ -158,6 +165,10 @@ impl<T: FpMontConfig> FpBackend for MontBackend<T> {
 
         Self::to_mont(inv)
     }
+
+    fn one() -> U256 {
+        Self::to_mont(U256::ONE)
+    }
 }
 
 pub struct Fp<B: FpBackend> {
@@ -172,6 +183,24 @@ impl<B: FpBackend> Fp<B> {
 
     pub fn inverse(self) -> Self {
         Fp::new(B::inverse(self.value))
+    }
+
+    // Square-and-multiply modular exponentiation: O(log exp) field muls
+    // instead of O(exp).
+    pub fn pow(self, exp: U256) -> Self {
+        let mut result = B::one();
+        let mut base = self.value;
+        let mut e = exp;
+
+        while e != U256::ZERO {
+            if e.bit(0) {
+                result = B::mul(result, base);
+            }
+            base = B::mul(base, base);
+            e >>= 1;
+        }
+
+        Fp::new(result)
     }
 }
 
@@ -454,6 +483,47 @@ mod tests {
         #[test]
         fn mont_div_matches_default(a in 0u64..17, b in 1u64..17) {
             prop_assert_eq!(canonical(fe_mont(a) / fe_mont(b)), (fe(a) / fe(b)).value);
+        }
+    }
+
+    #[test]
+    fn pow_zero_exponent_is_one() {
+        assert_eq!(fe(5).pow(U256::ZERO).value, U256::from(1));
+    }
+
+    #[test]
+    fn pow_one_exponent_is_self() {
+        assert_eq!(fe(5).pow(U256::ONE).value, fe(5).value);
+    }
+
+    proptest! {
+        #[test]
+        fn pow_matches_repeated_mul(a in 0u64..17, exp in 0u32..8) {
+            let mut expected = fe(1);
+            for _ in 0..exp {
+                expected = expected * fe(a);
+            }
+
+            prop_assert_eq!(fe(a).pow(U256::from(exp as u64)).value, expected.value);
+        }
+
+        #[test]
+        fn pow_result_is_canonical(a in 0u64..17, exp in 0u32..8) {
+            prop_assert!(fe(a).pow(U256::from(exp as u64)).value < Mod17::MODULUS);
+        }
+
+        #[test]
+        fn mont_pow_matches_default(a in 0u64..17, exp in 0u32..8) {
+            prop_assert_eq!(
+                canonical(fe_mont(a).pow(U256::from(exp as u64))),
+                fe(a).pow(U256::from(exp as u64)).value
+            );
+        }
+
+        #[test]
+        fn fermats_little_theorem(a in 1u64..17) {
+            // a^(p-1) == 1 (mod p) for prime p and a not divisible by p.
+            prop_assert_eq!(fe(a).pow(U256::from(16)).value, U256::from(1));
         }
     }
 
