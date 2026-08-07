@@ -38,6 +38,12 @@ pub trait FpBackend {
     // The multiplicative identity in this backend's representation
     // (plain 1 for DefaultBackend, R mod MODULUS for MontBackend).
     fn one() -> U256;
+
+    // Defaults to mul(a, a); backends override this with U256::square,
+    // which is cheaper than a general multiply.
+    fn square(a: U256) -> U256 {
+        Self::mul(a, a)
+    }
 }
 
 pub struct DefaultBackend<T: FpConfig>(PhantomData<T>);
@@ -87,6 +93,13 @@ impl<T: FpConfig> FpBackend for DefaultBackend<T> {
 
     fn one() -> U256 {
         U256::ONE
+    }
+
+    fn square(a: U256) -> U256 {
+        let product: U512 = a.square();
+        let modulus: U512 = Self::MODULUS.resize();
+
+        (product % modulus).resize()
     }
 }
 
@@ -169,6 +182,10 @@ impl<T: FpMontConfig> FpBackend for MontBackend<T> {
     fn one() -> U256 {
         Self::to_mont(U256::ONE)
     }
+
+    fn square(a: U256) -> U256 {
+        Self::redc(a.square())
+    }
 }
 
 pub struct Fp<B: FpBackend> {
@@ -185,6 +202,10 @@ impl<B: FpBackend> Fp<B> {
         Fp::new(B::inverse(self.value))
     }
 
+    pub fn square(self) -> Self {
+        Fp::new(B::square(self.value))
+    }
+
     // Square-and-multiply modular exponentiation: O(log exp) field muls
     // instead of O(exp).
     pub fn pow(self, exp: U256) -> Self {
@@ -196,7 +217,7 @@ impl<B: FpBackend> Fp<B> {
             if e.bit(0) {
                 result = B::mul(result, base);
             }
-            base = B::mul(base, base);
+            base = B::square(base);
             e >>= 1;
         }
 
@@ -362,6 +383,16 @@ mod tests {
         }
 
         #[test]
+        fn square_matches_mul(a in 0u64..17) {
+            prop_assert_eq!(fe(a).square().value, (fe(a) * fe(a)).value);
+        }
+
+        #[test]
+        fn square_result_is_canonical(a in 0u64..17) {
+            prop_assert!(fe(a).square().value < Mod17::MODULUS);
+        }
+
+        #[test]
         fn inverse_times_self_is_one(a in 1u64..17) {
             prop_assert_eq!((fe(a) * fe(a).inverse()).value, U256::from(1));
         }
@@ -468,6 +499,11 @@ mod tests {
         #[test]
         fn mont_mul_matches_default(a in 0u64..17, b in 0u64..17) {
             prop_assert_eq!(canonical(fe_mont(a) * fe_mont(b)), (fe(a) * fe(b)).value);
+        }
+
+        #[test]
+        fn mont_square_matches_default(a in 0u64..17) {
+            prop_assert_eq!(canonical(fe_mont(a).square()), fe(a).square().value);
         }
 
         #[test]

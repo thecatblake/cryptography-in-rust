@@ -189,6 +189,46 @@ impl Mul for U256 {
 }
 
 impl U256 {
+    // a*a is symmetric across the limb grid's diagonal (a[i]*a[j] ==
+    // a[j]*a[i]), so each off-diagonal product only needs to be computed
+    // once and doubled, instead of twice as full Mul would. That's 10
+    // single-limb multiplications (4 diagonal + 6 cross) instead of 16.
+    pub fn square(self) -> U512 {
+        let a = self;
+
+        // Cross sum: sum of a[i]*a[j] for i < j, positioned at limb i+j.
+        let mut cross = U512::ZERO;
+        for i in 0..4 {
+            let mut row = [0u64; 8];
+            let mut carry = 0u64;
+
+            for j in (i + 1)..4 {
+                let sum = a[i] as u128 * a[j] as u128 + carry as u128;
+
+                row[i + j] = sum as u64;
+                carry = (sum >> 64) as u64;
+            }
+            row[i + 4] = carry;
+
+            cross = cross + U512 { limbs: row };
+        }
+
+        // a^2 = diag + 2*cross, and a^2 < 2^512, so 2*cross < 2^512 and
+        // this left shift can't lose bits off the top.
+        let cross_doubled = cross << 1;
+
+        // Diagonal terms a[i]^2 land at limb pair [2i, 2i+1]; consecutive
+        // pairs never overlap, so no carry propagation is needed between them.
+        let mut diag = [0u64; 8];
+        for i in 0..4 {
+            let sq = a[i] as u128 * a[i] as u128;
+            diag[2 * i] = sq as u64;
+            diag[2 * i + 1] = (sq >> 64) as u64;
+        }
+
+        cross_doubled + U512 { limbs: diag }
+    }
+
     // Square-and-multiply, wrapping mod 2^256 (matches the widening Mul
     // above, truncated back down via resize on each step).
     pub fn pow(self, exp: Self) -> Self {
@@ -200,7 +240,7 @@ impl U256 {
             if e.bit(0) {
                 result = (result * base).resize();
             }
-            base = (base * base).resize();
+            base = base.square().resize();
             e >>= 1;
         }
 
@@ -466,6 +506,42 @@ mod tests {
         ]);
 
         assert_eq!(all_ones * two, expected);
+    }
+
+    #[test]
+    fn square_zero() {
+        assert_eq!(U256::ZERO.square(), U512::ZERO);
+    }
+
+    #[test]
+    fn square_one() {
+        assert_eq!(U256::ONE.square(), U512::ONE);
+    }
+
+    #[test]
+    fn square_propagates_carries_across_limbs() {
+        // (2^256 - 1)^2 exercises carries through both the cross-sum
+        // accumulation and the final cross+diag addition.
+        let all_ones = U256::from_limbs([u64::MAX; 4]);
+
+        assert_eq!(all_ones.square(), all_ones * all_ones);
+    }
+
+    proptest! {
+        #[test]
+        fn square_matches_mul(a in any::<u64>()) {
+            let ua = U256::from(a);
+
+            prop_assert_eq!(ua.square(), ua * ua);
+        }
+
+        #[test]
+        fn square_matches_u64(a in any::<u64>()) {
+            let ua = U256::from(a);
+            let expected = (a as u128) * (a as u128);
+
+            prop_assert_eq!(ua.square().low_u128(), expected);
+        }
     }
 
     proptest! {

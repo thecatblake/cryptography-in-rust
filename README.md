@@ -44,7 +44,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [x] Negation
 * [x] Inversion
 * [x] Exponentiation (`pow`)
-* [ ] Squaring
+* [x] Squaring
 * [ ] Square Root (Tonelli–Shanks)
 * [ ] Legendre symbol / quadratic residuosity
 * [ ] Montgomery form arithmetic (REDC)
