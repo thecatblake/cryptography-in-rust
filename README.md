@@ -56,7 +56,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 *Modern STARKs live here, not in 256-bit fields. Cheaper to implement than `Fp` and they make Phase 5 tractable.*
 
-* [ ] Goldilocks (`p = 2^64 − 2^32 + 1`)
+* [x] Goldilocks (`p = 2^64 − 2^32 + 1`)
 * [ ] BabyBear (`p = 2^31 − 2^27 + 1`)
 * [ ] Mersenne31 (`p = 2^31 − 1`)
 * [ ] Binary fields / tower field construction (`GF(2^k)`)
