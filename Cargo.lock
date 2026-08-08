@@ -12,6 +12,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "bigint"
 version = "0.1.0"
 dependencies = [
+ "field-core",
  "proptest",
 ]
 
@@ -63,8 +64,13 @@ name = "field"
 version = "0.1.0"
 dependencies = [
  "bigint",
+ "field-core",
  "proptest",
 ]
+
+[[package]]
+name = "field-core"
+version = "0.1.0"
 
 [[package]]
 name = "fnv"
@@ -93,6 +99,14 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi 6.0.0",
+]
+
+[[package]]
+name = "goldilocks"
+version = "0.1.0"
+dependencies = [
+ "field-core",
+ "proptest",
 ]
 
 [[package]]

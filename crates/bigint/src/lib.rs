@@ -2,6 +2,8 @@ use std::ops::{Index, Add, Sub, Mul, Div, Rem, AddAssign, SubAssign, Shl, ShlAss
 
 use std::cmp::Ordering;
 
+use field_core::FpRepr;
+
 pub mod math;
 
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
@@ -98,6 +100,14 @@ impl<const N: usize> PartialOrd for Uint<N> {
 
 impl<const N: usize> Uint<N> {
     pub const ZERO: Self = Self { limbs: [0; N] };
+}
+
+impl<const N: usize> FpRepr for Uint<N> {
+    const ZERO: Self = Self::ZERO;
+
+    fn bit(&self, i: usize) -> bool {
+        Uint::bit(self, i)
+    }
 }
 
 impl<const N: usize> From<u64> for Uint<N> {
