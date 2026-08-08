@@ -212,6 +212,41 @@ impl<T: MontFieldConfig> MontWideBackend<T> {
     }
 }
 
+// Const-evaluable counterpart to MontWideBackend::to_mont, one per
+// primitive width (mirrors impl_fp_repr!/impl_wide_int!'s per-width
+// codegen above). A fully generic `to_mont<T: MontFieldConfig>` can't be a
+// const fn on stable Rust: internally it calls WideInt's widen/wide_mul/
+// narrow through generic trait dispatch, and const trait dispatch isn't
+// stable yet. Written directly against a concrete primitive pair instead
+// -- same REDC steps as MontWideBackend::to_mont/redc, just with `as`
+// casts standing in for widen/narrow/wide_mul -- so it *is* const, just
+// not generic. Lets a MontFieldConfig/Fp2Config implementor write BETA (or
+// any other Montgomery-form constant) starting from its plain/canonical
+// value, with the conversion happening at compile time instead of via a
+// runtime to_mont() call or an offline-computed magic number.
+macro_rules! impl_const_to_mont {
+    ($name:ident, $repr:ty, $wide:ty) => {
+        pub const fn $name(value: $repr, r2: $repr, n_prime: $repr, modulus: $repr) -> $repr {
+            let t = (value as $wide) * (r2 as $wide);
+            let t_low = t as $repr;
+            let m = ((t_low as $wide) * (n_prime as $wide)) as $repr;
+
+            // t + m*modulus is guaranteed divisible by R by construction of m.
+            let sum = t + (m as $wide) * (modulus as $wide);
+            let quotient = sum >> <$repr>::BITS;
+
+            let modulus_wide = modulus as $wide;
+
+            (if quotient >= modulus_wide { quotient - modulus_wide } else { quotient }) as $repr
+        }
+    };
+}
+
+impl_const_to_mont!(to_mont_u8, u8, u16);
+impl_const_to_mont!(to_mont_u16, u16, u32);
+impl_const_to_mont!(to_mont_u32, u32, u64);
+impl_const_to_mont!(to_mont_u64, u64, u128);
+
 impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
     type Repr = T::Repr;
 
@@ -282,7 +317,7 @@ impl<B: FpBackend> Clone for Fp<B> {
 impl<B: FpBackend> Copy for Fp<B> {}
 
 impl<B: FpBackend> Fp<B> {
-    pub fn new(value: B::Repr) -> Self {
+    pub const fn new(value: B::Repr) -> Self {
         Fp { value, _marker: PhantomData }
     }
 

@@ -8,12 +8,19 @@ use crate::{Fp, MontFieldConfig, MontWideBackend};
 // backend (MontWideBackend<Self>, via MODULUS/R2/N_PRIME), so an Fp2Config
 // implementor holds both the base field's Montgomery backend and BETA.
 //
-// BETA is stored in canonical (non-Montgomery) form, same as MODULUS --
-// `beta()` below converts it once it's needed as a field element.
-pub trait Fp2Config: MontFieldConfig {
+// BETA is typed as an Fp element (not a raw Self::Repr) and fixed at
+// compile time via Fp::new being a const fn, so it's a genuine associated
+// constant -- no conversion or wrapping happens at the use site, same as
+// referencing MontFieldConfig::MODULUS/R2/N_PRIME directly.
+pub trait Fp2Config: MontFieldConfig + Sized {
     // Must be a quadratic non-residue mod Self::MODULUS, or u^2 - BETA
     // factors and Fp2 collapses to Fp x Fp instead of being a field.
-    const BETA: Self::Repr;
+    //
+    // Write this as Fp::new(to_mont_uNN(plain_value, Self::R2, Self::N_PRIME,
+    // Self::MODULUS)) (see field_core::to_mont_u32 et al.): the plain,
+    // canonical residue goes in, and the Montgomery-form conversion runs at
+    // compile time as part of evaluating this const, not at runtime.
+    const BETA: Fp<MontWideBackend<Self>>;
 }
 
 // Fp2 = Fp[u] / (u^2 - BETA), elements represented as c0 + c1*u.
@@ -38,16 +45,11 @@ impl<C: Fp2Config> Fp2<C> {
         Fp2 { c0, c1 }
     }
 
-    // BETA lifted into the base field, in Montgomery form.
-    pub fn beta() -> Fp<MontWideBackend<C>> {
-        Fp::new(MontWideBackend::<C>::to_mont(C::BETA))
-    }
-
     // N(a) = a * conjugate(a) = (c0+c1*u)(c0-c1*u) = c0^2 - c1^2*u^2, and
     // u^2 == BETA by definition of Fp2, so this collapses to a base-field
     // element. `inverse` below is defined in terms of it.
     pub fn norm(self) -> Fp<MontWideBackend<C>> {
-        self.c0.square() - Self::beta() * self.c1.square()
+        self.c0.square() - C::BETA * self.c1.square()
     }
 
     // Multiplicative inverse. For a = c0 + c1*u,
@@ -56,7 +58,7 @@ impl<C: Fp2Config> Fp2<C> {
     // here rather than via self.norm() since it's needed before the
     // conjugate is built.
     pub fn inverse(self) -> Self {
-        let denom_inv = (self.c0.square() - Self::beta() * self.c1.square()).inverse();
+        let denom_inv = (self.c0.square() - C::BETA * self.c1.square()).inverse();
 
         Fp2::new(self.c0 * denom_inv, -(self.c1 * denom_inv))
     }
@@ -102,7 +104,7 @@ impl<C: Fp2Config> Mul for Fp2<C> {
         let v0 = self.c0 * rhs.c0;
         let v1 = self.c1 * rhs.c1;
 
-        let c0 = v0 + Self::beta() * v1;
+        let c0 = v0 + C::BETA * v1;
         let c1 = (self.c0 + self.c1) * (rhs.c0 + rhs.c1) - v0 - v1;
 
         Fp2::new(c0, c1)
@@ -112,6 +114,7 @@ impl<C: Fp2Config> Mul for Fp2<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::to_mont_u32;
     use proptest::prelude::*;
 
     // Same shape as field's Mod17Mont test fixture, just u32-native instead
@@ -128,10 +131,17 @@ mod tests {
         const N_PRIME: u32 = 0x0f0f_0f0f;
     }
 
+    // Canonical (non-Montgomery) residue of Mod17Mont::BETA, used by tests
+    // that need to check Fp2 arithmetic against a plain-integer formula.
+    const BETA_CANONICAL: u32 = 3;
+
     impl Fp2Config for Mod17Mont {
         // QRs mod 17 are {1,2,4,8,9,13,15,16}; 3 isn't among them, so
-        // u^2 - 3 is irreducible over F17.
-        const BETA: u32 = 3;
+        // u^2 - 3 is irreducible over F17. BETA_CANONICAL (the plain
+        // residue) goes in; to_mont_u32 converts it to Montgomery form as
+        // part of evaluating this const, at compile time.
+        const BETA: Fp<MontWideBackend<Self>> =
+            Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
     }
 
     type Backend = MontWideBackend<Mod17Mont>;
@@ -158,7 +168,18 @@ mod tests {
 
     #[test]
     fn beta_matches_configured_value() {
-        assert_eq!(canonical(F17_2::beta()), Mod17Mont::BETA);
+        assert_eq!(canonical(Mod17Mont::BETA), BETA_CANONICAL);
+    }
+
+    #[test]
+    fn const_to_mont_matches_runtime_to_mont() {
+        // The compile-time path (to_mont_u32, used by Mod17Mont::BETA above)
+        // must agree with the runtime path (MontWideBackend::to_mont) --
+        // they implement the same REDC steps against the same inputs.
+        assert_eq!(
+            to_mont_u32(BETA_CANONICAL, Mod17Mont::R2, Mod17Mont::N_PRIME, Mod17Mont::MODULUS),
+            Backend::to_mont(BETA_CANONICAL),
+        );
     }
 
     #[test]
@@ -192,7 +213,7 @@ mod tests {
         let product = fe2(a0, a1) * fe2(b0, b1);
 
         // (a0 + a1*u)(b0 + b1*u) = (a0*b0 + BETA*a1*b1) + (a0*b1 + a1*b0)*u
-        let expected_c0 = (a0 * b0 + Mod17Mont::BETA * a1 * b1) % 17;
+        let expected_c0 = (a0 * b0 + BETA_CANONICAL * a1 * b1) % 17;
         let expected_c1 = (a0 * b1 + a1 * b0) % 17;
 
         assert_eq!(canonical(product.c0), expected_c0);
@@ -206,7 +227,7 @@ mod tests {
 
         // c0^2 - BETA*c1^2
         let p = 17u32;
-        let expected = ((c0 * c0 + p * p - (Mod17Mont::BETA * c1 * c1) % p) % p) % p;
+        let expected = ((c0 * c0 + p * p - (BETA_CANONICAL * c1 * c1) % p) % p) % p;
 
         assert_eq!(canonical(norm), expected);
     }
@@ -228,7 +249,7 @@ mod tests {
             let norm = fe2(c0, c1).norm();
 
             let p = 17u32;
-            let expected = ((c0 * c0 + p * p - (Mod17Mont::BETA * c1 * c1) % p) % p) % p;
+            let expected = ((c0 * c0 + p * p - (BETA_CANONICAL * c1 * c1) % p) % p) % p;
 
             prop_assert_eq!(canonical(norm), expected);
         }
@@ -253,7 +274,7 @@ mod tests {
         fn mul_matches_schoolbook(a0 in 0u32..17, a1 in 0u32..17, b0 in 0u32..17, b1 in 0u32..17) {
             let product = fe2(a0, a1) * fe2(b0, b1);
 
-            let expected_c0 = (a0 * b0 + Mod17Mont::BETA * a1 * b1) % 17;
+            let expected_c0 = (a0 * b0 + BETA_CANONICAL * a1 * b1) % 17;
             let expected_c1 = (a0 * b1 + a1 * b0) % 17;
 
             prop_assert_eq!(canonical(product.c0), expected_c0);
