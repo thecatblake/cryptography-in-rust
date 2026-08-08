@@ -1,0 +1,16 @@
+[package]
+name = "mersenne31"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+field-core = { path = "../field-core" }
+
+[dev-dependencies]
+proptest = "1"
+criterion = { workspace = true }
+
+[[bench]]
+name = "mersenne31_ops"
+harness = false
