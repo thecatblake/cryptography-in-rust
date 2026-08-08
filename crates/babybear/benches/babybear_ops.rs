@@ -2,8 +2,8 @@ use babybear::{BabyBear, BabyBearBackend, FpBackend};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn bench_babybear(c: &mut Criterion) {
-    let a = BabyBear::new(0x1234_5678 % BabyBearBackend::MODULUS);
-    let b = BabyBear::new(0x0abc_def0 % BabyBearBackend::MODULUS);
+    let a = BabyBear::new(BabyBearBackend::to_mont(0x1234_5678 % BabyBearBackend::MODULUS));
+    let b = BabyBear::new(BabyBearBackend::to_mont(0x0abc_def0 % BabyBearBackend::MODULUS));
     let exp = 0x1234_5678u32;
 
     let mut group = c.benchmark_group("BabyBearBackend");

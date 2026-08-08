@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::ops::{Add, Div, Mul, Neg, ShrAssign, Sub};
+use std::ops::{Add, Div, Mul, Neg, Shr, ShrAssign, Sub};
 
 // The value should only satisfy this.
 pub trait FpRepr: Copy + PartialEq + ShrAssign<usize> {
@@ -47,24 +47,32 @@ pub trait FpBackend {
     }
 }
 
-// A machine integer that's compact enough to be a native field element
-// (u32, u64, ...), plus a wider integer type it can be widened into to do
-// add/sub without overflow before reducing back down.
-pub trait NativeInt: FpRepr {
-    type Wide: Copy + PartialOrd + Add<Output = Self::Wide> + Sub<Output = Self::Wide>;
+// An integer with a strictly wider scratch type to add/multiply into
+// without overflow before reducing back down. Not "native machine int"
+// specific by design -- a bigint type with a double-width counterpart
+// (e.g. U256 with U512) can satisfy this same contract, so backends built
+// on it aren't tied to primitive integers only.
+pub trait WideInt: FpRepr {
+    type Wide: Copy + PartialOrd + Add<Output = Self::Wide> + Sub<Output = Self::Wide> + Shr<usize, Output = Self::Wide>;
+
+    // Bit width of Self (so R = 2^BITS for Montgomery-style backends).
+    const BITS: usize;
 
     fn widen(self) -> Self::Wide;
     fn narrow(wide: Self::Wide) -> Self;
+    fn wide_mul(self, other: Self) -> Self::Wide;
     fn from_u8(v: u8) -> Self;
 }
 
 // Only pairs with a strictly wider native integer type can implement this
 // (there's no built-in "next size up" past u128), so each pair is spelled
 // out once here rather than derived generically.
-macro_rules! impl_native_int {
+macro_rules! impl_wide_int {
     ($repr:ty => $wide:ty) => {
-        impl NativeInt for $repr {
+        impl WideInt for $repr {
             type Wide = $wide;
+
+            const BITS: usize = <$repr>::BITS as usize;
 
             fn widen(self) -> $wide {
                 self as $wide
@@ -74,6 +82,10 @@ macro_rules! impl_native_int {
                 wide as $repr
             }
 
+            fn wide_mul(self, other: $repr) -> $wide {
+                self as $wide * other as $wide
+            }
+
             fn from_u8(v: u8) -> $repr {
                 v as $repr
             }
@@ -81,27 +93,27 @@ macro_rules! impl_native_int {
     };
 }
 
-impl_native_int!(u8 => u16);
-impl_native_int!(u16 => u32);
-impl_native_int!(u32 => u64);
-impl_native_int!(u64 => u128);
+impl_wide_int!(u8 => u16);
+impl_wide_int!(u16 => u32);
+impl_wide_int!(u32 => u64);
+impl_wide_int!(u64 => u128);
 
-// Small native fields (representable in a single u32/u64) share the same
+// Small fields (representable in a single machine word) share the same
 // add/sub/neg/inverse shape; only the multiplication reduction differs
 // enough per-field to be worth hand-optimizing (e.g. Goldilocks' epsilon
-// trick vs BabyBear's plain `%`). Implementors only need to supply the
-// representation width, the modulus, and that one routine.
-pub trait NativeFieldConfig {
-    type Repr: NativeInt;
+// trick). Implementors only need to supply the representation width, the
+// modulus, and that one routine.
+pub trait WideFieldConfig {
+    type Repr: WideInt;
 
     const MODULUS: Self::Repr;
 
     fn mul(a: Self::Repr, b: Self::Repr) -> Self::Repr;
 }
 
-pub struct NativeArithmeticBackend<T: NativeFieldConfig>(PhantomData<T>);
+pub struct WideArithmeticBackend<T: WideFieldConfig>(PhantomData<T>);
 
-impl<T: NativeFieldConfig> FpBackend for NativeArithmeticBackend<T> {
+impl<T: WideFieldConfig> FpBackend for WideArithmeticBackend<T> {
     type Repr = T::Repr;
 
     const MODULUS: T::Repr = T::MODULUS;
@@ -149,6 +161,105 @@ impl<T: NativeFieldConfig> FpBackend for NativeArithmeticBackend<T> {
 
     fn one() -> T::Repr {
         T::Repr::from_u8(1)
+    }
+}
+
+// A field represented via Montgomery (REDC) reduction instead of a native
+// reduction trick: values are stored as a*R mod MODULUS ("Montgomery
+// form"), and REDC undoes that scaling as a side effect of reducing a
+// product mod MODULUS, using only shifts, adds, and multiplies -- no
+// division.
+//
+// Only safe when MODULUS < R/2 (R = 2^Repr::BITS), i.e. MODULUS uses at
+// most BITS-1 bits: REDC's intermediate `t + m*MODULUS` is bounded by
+// 2*R*MODULUS, which must fit inside Wide (2*BITS bits) without an extra
+// guard bit. A modulus using the full width of Repr (e.g. a 256-bit prime
+// stored in a 256-bit Repr) needs one more bit of scratch than Wide
+// provides, which this backend doesn't allocate.
+pub trait MontFieldConfig {
+    type Repr: WideInt;
+
+    const MODULUS: Self::Repr;
+    const R2: Self::Repr;
+    const N_PRIME: Self::Repr;
+}
+
+pub struct MontWideBackend<T: MontFieldConfig>(PhantomData<T>);
+
+impl<T: MontFieldConfig> MontWideBackend<T> {
+    fn redc(t: <T::Repr as WideInt>::Wide) -> T::Repr {
+        let t_low = T::Repr::narrow(t);
+        let m = T::Repr::narrow(t_low.wide_mul(T::N_PRIME));
+
+        // t + m*MODULUS is guaranteed divisible by R by construction of m.
+        let sum = t + m.wide_mul(T::MODULUS);
+        let quotient = sum >> T::Repr::BITS;
+
+        let modulus = T::MODULUS.widen();
+
+        T::Repr::narrow(if quotient >= modulus { quotient - modulus } else { quotient })
+    }
+
+    pub fn to_mont(a: T::Repr) -> T::Repr {
+        Self::redc(a.wide_mul(T::R2))
+    }
+
+    pub fn from_mont(a: T::Repr) -> T::Repr {
+        Self::redc(a.widen())
+    }
+}
+
+impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
+    type Repr = T::Repr;
+
+    const MODULUS: T::Repr = T::MODULUS;
+
+    fn add(a: T::Repr, b: T::Repr) -> T::Repr {
+        let sum = a.widen() + b.widen();
+        let modulus = Self::MODULUS.widen();
+
+        T::Repr::narrow(if sum >= modulus { sum - modulus } else { sum })
+    }
+
+    fn sub(a: T::Repr, b: T::Repr) -> T::Repr {
+        let a = a.widen();
+        let b = b.widen();
+
+        T::Repr::narrow(if a >= b { a - b } else { a + Self::MODULUS.widen() - b })
+    }
+
+    fn mul(a: T::Repr, b: T::Repr) -> T::Repr {
+        Self::redc(a.wide_mul(b))
+    }
+
+    fn neg(a: T::Repr) -> T::Repr {
+        if a == T::Repr::ZERO { T::Repr::ZERO } else { T::Repr::narrow(Self::MODULUS.widen() - a.widen()) }
+    }
+
+    // Fermat's little theorem, carried out entirely in Montgomery form:
+    // Montgomery multiplication is a ring isomorphism, so repeated
+    // Self::mul/Self::square on Montgomery-form values computes
+    // (a^e)_mont directly, with no to_mont/from_mont round-trip needed.
+    fn inverse(a: T::Repr) -> T::Repr {
+        assert!(a != T::Repr::ZERO, "cannot invert zero in a field");
+
+        let mut result = Self::one();
+        let mut base = a;
+        let mut e = T::Repr::narrow(Self::MODULUS.widen() - T::Repr::from_u8(2).widen());
+
+        while e != T::Repr::ZERO {
+            if e.bit(0) {
+                result = Self::mul(result, base);
+            }
+            base = Self::square(base);
+            e >>= 1;
+        }
+
+        result
+    }
+
+    fn one() -> T::Repr {
+        Self::to_mont(T::Repr::from_u8(1))
     }
 }
 

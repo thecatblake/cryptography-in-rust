@@ -1,9 +1,9 @@
-use field_core::{Fp, NativeArithmeticBackend, NativeFieldConfig};
+use field_core::{Fp, WideArithmeticBackend, WideFieldConfig};
 
 pub use field_core::FpBackend;
 
 // The Goldilocks prime, p = 2^64 - 2^32 + 1. Fits in a single u64 limb, so
-// this backend skips bigint entirely and does arithmetic natively.
+// this backend skips bigint entirely and does arithmetic on the machine word.
 const GOLDILOCKS_P: u64 = 0xFFFF_FFFF_0000_0001;
 // 2^64 mod p: p = 2^64 - 2^32 + 1, so 2^64 == 2^32 - 1 (mod p).
 const GOLDILOCKS_EPSILON: u64 = 0xFFFF_FFFF;
@@ -32,7 +32,7 @@ fn goldilocks_reduce128(x: u128) -> u64 {
 
 pub struct GoldilocksConfig;
 
-impl NativeFieldConfig for GoldilocksConfig {
+impl WideFieldConfig for GoldilocksConfig {
     type Repr = u64;
 
     const MODULUS: u64 = GOLDILOCKS_P;
@@ -42,7 +42,7 @@ impl NativeFieldConfig for GoldilocksConfig {
     }
 }
 
-pub type GoldilocksBackend = NativeArithmeticBackend<GoldilocksConfig>;
+pub type GoldilocksBackend = WideArithmeticBackend<GoldilocksConfig>;
 pub type Goldilocks = Fp<GoldilocksBackend>;
 
 #[cfg(test)]
