@@ -10,3 +10,8 @@ field-core = { path = "../field-core" }
 
 [dev-dependencies]
 proptest = "1"
+criterion = { workspace = true }
+
+[[bench]]
+name = "field_ops"
+harness = false

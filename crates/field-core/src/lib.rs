@@ -42,6 +42,16 @@ pub struct Fp<B: FpBackend> {
     _marker: PhantomData<B>,
 }
 
+// Derived impls would require B: Clone/Copy, but only B::Repr needs to be
+// (FpRepr's Copy supertrait already guarantees that), so implement by hand.
+impl<B: FpBackend> Clone for Fp<B> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<B: FpBackend> Copy for Fp<B> {}
+
 impl<B: FpBackend> Fp<B> {
     pub fn new(value: B::Repr) -> Self {
         Fp { value, _marker: PhantomData }

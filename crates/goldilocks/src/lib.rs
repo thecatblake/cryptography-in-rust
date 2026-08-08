@@ -1,4 +1,6 @@
-use field_core::{Fp, FpBackend};
+use field_core::Fp;
+
+pub use field_core::FpBackend;
 
 // The Goldilocks prime, p = 2^64 - 2^32 + 1. Fits in a single u64 limb, so
 // this backend skips bigint entirely and does arithmetic natively.

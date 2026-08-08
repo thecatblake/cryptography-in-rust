@@ -261,21 +261,32 @@ impl U256 {
 impl<const N: usize> Shl<usize> for Uint<N> {
     type Output = Self;
 
+    // Shifts spanning more than one limb (rhs >= 64) need to move whole
+    // limbs first, then apply the remaining sub-64 bit shift across each
+    // adjacent limb pair. div_rem relies on this: it aligns divisor with
+    // dividend by shifting by (dividend.bits() - divisor.bits()), which
+    // routinely exceeds 63 once dividend and divisor differ by more than
+    // one limb in magnitude (e.g. a U512 product reduced by a U256 modulus).
     fn shl(self, rhs: usize) -> Self::Output {
-        assert!(rhs < 64);
+        assert!(rhs < N * 64);
+
+        if rhs == 0 {
+            return self;
+        }
+
+        let limb_shift = rhs / 64;
+        let bit_shift = rhs % 64;
 
         let mut result = [0u64; N];
-        let mut carry = 0u64;
 
-        for i in 0..N {
-            let new_carry = if rhs == 0 {
-                0
-            } else {
-                self[i] >> (64 - rhs)
-            };
+        for i in (limb_shift..N).rev() {
+            let mut v = self[i - limb_shift] << bit_shift;
 
-            result[i] = (self[i] << rhs) | carry;
-            carry = new_carry;
+            if bit_shift != 0 && i > limb_shift {
+                v |= self[i - limb_shift - 1] >> (64 - bit_shift);
+            }
+
+            result[i] = v;
         }
 
         Uint { limbs: result }
@@ -291,21 +302,29 @@ impl<const N: usize> ShlAssign<usize> for Uint<N> {
 impl<const N: usize> Shr<usize> for Uint<N> {
     type Output = Self;
 
+    // See Shl's comment: rhs can span multiple limbs, so shift whole limbs
+    // first and then the remaining sub-64 bit shift per adjacent limb pair.
     fn shr(self, rhs: usize) -> Self::Output {
-        assert!(rhs < 64);
+        assert!(rhs < N * 64);
+
+        if rhs == 0 {
+            return self;
+        }
+
+        let limb_shift = rhs / 64;
+        let bit_shift = rhs % 64;
 
         let mut result = [0u64; N];
-        let mut carry = 0u64;
 
-        for i in (0..N).rev() {
-            let new_carry = if rhs == 0 {
-                0
-            } else {
-                self[i] << (64 - rhs)
-            };
+        for i in 0..(N - limb_shift) {
+            let src = i + limb_shift;
+            let mut v = self[src] >> bit_shift;
 
-            result[i] = (self[i] >> rhs) | carry;
-            carry = new_carry;
+            if bit_shift != 0 && src + 1 < N {
+                v |= self[src + 1] << (64 - bit_shift);
+            }
+
+            result[i] = v;
         }
 
         Uint { limbs: result }
@@ -554,6 +573,78 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shl_within_single_limb_matches_old_behavior() {
+        assert_eq!(U256::from(1u64) << 3, U256::from(8u64));
+    }
+
+    #[test]
+    fn shl_by_zero_is_identity() {
+        let a = U256::from_limbs([1, 2, 3, 4]);
+        assert_eq!(a << 0, a);
+    }
+
+    #[test]
+    fn shl_across_one_limb_boundary() {
+        // 1 << 64 must land exactly on limb 1, not panic like the old
+        // single-limb-only Shl (assert!(rhs < 64)) would have.
+        assert_eq!(U256::from(1u64) << 64, U256::from_limbs([0, 1, 0, 0]));
+    }
+
+    #[test]
+    fn shl_across_multiple_limbs_with_sub_limb_remainder() {
+        // 1 << 130 = limb_shift 2, bit_shift 2 -> bit 130 set, i.e. limb 2 = 0b100.
+        assert_eq!(U256::from(1u64) << 130, U256::from_limbs([0, 0, 0b100, 0]));
+    }
+
+    #[test]
+    fn shl_carries_bits_across_the_shifted_boundary() {
+        // Bit 63 shifted by 65 lands at bit 128 (limb 2, offset 0): the
+        // in-limb shift wraps a bit up past the immediately-next limb.
+        let a = U256::from_limbs([1u64 << 63, 0, 0, 0]);
+        assert_eq!(a << 65, U256::from_limbs([0, 0, 1, 0]));
+    }
+
+    #[test]
+    fn shr_across_multiple_limbs_with_sub_limb_remainder() {
+        let a = U256::from_limbs([0, 0, 0b100, 0]);
+        assert_eq!(a >> 130, U256::from(1u64));
+    }
+
+    #[test]
+    fn shr_carries_bits_across_the_shifted_boundary() {
+        // Bit 65 shifted right by 65 lands at bit 0.
+        let a = U256::from_limbs([0, 2, 0, 0]);
+        assert_eq!(a >> 65, U256::from(1u64));
+    }
+
+    #[test]
+    fn shl_shr_roundtrip_across_limb_boundary() {
+        // Kept under 64 bits so shifting left by 130 (194 bits total) can't
+        // lose bits off the top of a U256, letting the round trip hold.
+        let a = U256::from_limbs([0x1234_5678_9abc_def0, 0, 0, 0]);
+        assert_eq!((a << 130) >> 130, a);
+    }
+
+    proptest! {
+        #[test]
+        fn shl_matches_u128_for_small_shifts(a in any::<u64>(), shift in 0usize..128) {
+            let ua = U256::from(a);
+            let expected = ((a as u128) << shift) as u64;
+
+            prop_assert_eq!((ua << shift).low_u64(), expected);
+        }
+
+        #[test]
+        fn shr_matches_u128_for_small_shifts(a in any::<u64>(), shift in 0usize..128) {
+            let ua = U256::from(a);
+            // a fits in the low limb, so shifting right by >= 64 always yields 0.
+            let expected = if shift >= 64 { 0 } else { a >> shift };
+
+            prop_assert_eq!((ua >> shift).low_u64(), expected);
+        }
+    }
+
     proptest! {
         #[test]
         fn div_by_one(a in any::<u64>()) {
@@ -632,6 +723,24 @@ mod tests {
             prop_assert_eq!(q * ub + U512::from(r.low_u64()), U512::from(a));
             prop_assert!(r < ub);
         }
+    }
+
+    #[test]
+    fn div_rem_wide_bit_length_gap_regression() {
+        // dividend.bits() - divisor.bits() here is ~193, forcing div_rem's
+        // `divisor <<= shift` past a single limb. The old Shl (assert!(rhs
+        // < 64)) panicked on this; this is exactly the shape DefaultBackend's
+        // `product % modulus` produces for a real-sized (non-tiny) prime.
+        let dividend = U512::from_limbs([0, 0, 0, 1, 0, 0, 0, 0]); // 2^192
+        let divisor: U512 = U256::from(3u64).resize();
+
+        let (q, r) = dividend.div_rem(divisor);
+
+        // 2 == -1 (mod 3), so 2^192 == (-1)^192 == 1 (mod 3).
+        assert_eq!(r, U512::from(1u64));
+        assert!(r < divisor);
+        // U512 has no Mul, so verify q*3 + r == dividend via repeated addition.
+        assert_eq!(q + q + q + r, dividend);
     }
 
     #[test]

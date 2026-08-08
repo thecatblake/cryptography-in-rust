@@ -1,9 +1,8 @@
 use bigint::{U256, U512, Uint};
 use bigint::math::mod_inv;
-use field_core::FpBackend;
 use std::marker::PhantomData;
 
-pub use field_core::Fp;
+pub use field_core::{Fp, FpBackend};
 
 // FpConfig associates a modulus with the type rather than each value.
 // This makes field elements with different moduli different Rust types,
