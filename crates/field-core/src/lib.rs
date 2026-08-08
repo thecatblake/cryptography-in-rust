@@ -8,13 +8,23 @@ pub trait FpRepr: Copy + PartialEq + ShrAssign<usize> {
     fn bit(&self, i: usize) -> bool;
 }
 
-impl FpRepr for u64 {
-    const ZERO: Self = 0;
+macro_rules! impl_fp_repr {
+    ($repr:ty) => {
+        impl FpRepr for $repr {
+            const ZERO: Self = 0;
 
-    fn bit(&self, i: usize) -> bool {
-        (self >> i) & 1 == 1
-    }
+            fn bit(&self, i: usize) -> bool {
+                (self >> i) & 1 == 1
+            }
+        }
+    };
 }
+
+impl_fp_repr!(u8);
+impl_fp_repr!(u16);
+impl_fp_repr!(u32);
+impl_fp_repr!(u64);
+impl_fp_repr!(u128);
 
 pub trait FpBackend {
     type Repr: FpRepr;
@@ -34,6 +44,111 @@ pub trait FpBackend {
     // squaring routine is cheaper than a general multiply.
     fn square(a: Self::Repr) -> Self::Repr {
         Self::mul(a, a)
+    }
+}
+
+// A machine integer that's compact enough to be a native field element
+// (u32, u64, ...), plus a wider integer type it can be widened into to do
+// add/sub without overflow before reducing back down.
+pub trait NativeInt: FpRepr {
+    type Wide: Copy + PartialOrd + Add<Output = Self::Wide> + Sub<Output = Self::Wide>;
+
+    fn widen(self) -> Self::Wide;
+    fn narrow(wide: Self::Wide) -> Self;
+    fn from_u8(v: u8) -> Self;
+}
+
+// Only pairs with a strictly wider native integer type can implement this
+// (there's no built-in "next size up" past u128), so each pair is spelled
+// out once here rather than derived generically.
+macro_rules! impl_native_int {
+    ($repr:ty => $wide:ty) => {
+        impl NativeInt for $repr {
+            type Wide = $wide;
+
+            fn widen(self) -> $wide {
+                self as $wide
+            }
+
+            fn narrow(wide: $wide) -> $repr {
+                wide as $repr
+            }
+
+            fn from_u8(v: u8) -> $repr {
+                v as $repr
+            }
+        }
+    };
+}
+
+impl_native_int!(u8 => u16);
+impl_native_int!(u16 => u32);
+impl_native_int!(u32 => u64);
+impl_native_int!(u64 => u128);
+
+// Small native fields (representable in a single u32/u64) share the same
+// add/sub/neg/inverse shape; only the multiplication reduction differs
+// enough per-field to be worth hand-optimizing (e.g. Goldilocks' epsilon
+// trick vs BabyBear's plain `%`). Implementors only need to supply the
+// representation width, the modulus, and that one routine.
+pub trait NativeFieldConfig {
+    type Repr: NativeInt;
+
+    const MODULUS: Self::Repr;
+
+    fn mul(a: Self::Repr, b: Self::Repr) -> Self::Repr;
+}
+
+pub struct NativeArithmeticBackend<T: NativeFieldConfig>(PhantomData<T>);
+
+impl<T: NativeFieldConfig> FpBackend for NativeArithmeticBackend<T> {
+    type Repr = T::Repr;
+
+    const MODULUS: T::Repr = T::MODULUS;
+
+    fn add(a: T::Repr, b: T::Repr) -> T::Repr {
+        let sum = a.widen() + b.widen();
+        let modulus = Self::MODULUS.widen();
+
+        T::Repr::narrow(if sum >= modulus { sum - modulus } else { sum })
+    }
+
+    fn sub(a: T::Repr, b: T::Repr) -> T::Repr {
+        let a = a.widen();
+        let b = b.widen();
+
+        T::Repr::narrow(if a >= b { a - b } else { a + Self::MODULUS.widen() - b })
+    }
+
+    fn mul(a: T::Repr, b: T::Repr) -> T::Repr {
+        T::mul(a, b)
+    }
+
+    fn neg(a: T::Repr) -> T::Repr {
+        if a == T::Repr::ZERO { T::Repr::ZERO } else { T::Repr::narrow(Self::MODULUS.widen() - a.widen()) }
+    }
+
+    // Fermat's little theorem: a^(p-2) == a^-1 (mod p).
+    fn inverse(a: T::Repr) -> T::Repr {
+        assert!(a != T::Repr::ZERO, "cannot invert zero in a field");
+
+        let mut result = T::Repr::from_u8(1);
+        let mut base = a;
+        let mut e = T::Repr::narrow(Self::MODULUS.widen() - T::Repr::from_u8(2).widen());
+
+        while e != T::Repr::ZERO {
+            if e.bit(0) {
+                result = Self::mul(result, base);
+            }
+            base = Self::square(base);
+            e >>= 1;
+        }
+
+        result
+    }
+
+    fn one() -> T::Repr {
+        T::Repr::from_u8(1)
     }
 }
 

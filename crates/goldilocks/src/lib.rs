@@ -1,4 +1,4 @@
-use field_core::Fp;
+use field_core::{Fp, NativeArithmeticBackend, NativeFieldConfig};
 
 pub use field_core::FpBackend;
 
@@ -7,8 +7,6 @@ pub use field_core::FpBackend;
 const GOLDILOCKS_P: u64 = 0xFFFF_FFFF_0000_0001;
 // 2^64 mod p: p = 2^64 - 2^32 + 1, so 2^64 == 2^32 - 1 (mod p).
 const GOLDILOCKS_EPSILON: u64 = 0xFFFF_FFFF;
-
-pub struct GoldilocksBackend;
 
 // x = x_hi*2^64 + x_lo == x_hi*EPSILON + x_lo (mod p). Splitting
 // x_hi = x_hi_hi*2^32 + x_hi_lo and using 2^32*EPSILON == -1 (mod p) reduces
@@ -32,57 +30,19 @@ fn goldilocks_reduce128(x: u128) -> u64 {
     if t2 >= GOLDILOCKS_P { t2 - GOLDILOCKS_P } else { t2 }
 }
 
-impl FpBackend for GoldilocksBackend {
+pub struct GoldilocksConfig;
+
+impl NativeFieldConfig for GoldilocksConfig {
     type Repr = u64;
 
     const MODULUS: u64 = GOLDILOCKS_P;
 
-    fn add(a: u64, b: u64) -> u64 {
-        let (sum, carry) = a.overflowing_add(b);
-        let sum = if carry { sum.wrapping_add(GOLDILOCKS_EPSILON) } else { sum };
-
-        if sum >= Self::MODULUS { sum - Self::MODULUS } else { sum }
-    }
-
-    fn sub(a: u64, b: u64) -> u64 {
-        let (diff, borrow) = a.overflowing_sub(b);
-
-        if borrow { diff.wrapping_sub(GOLDILOCKS_EPSILON) } else { diff }
-    }
-
     fn mul(a: u64, b: u64) -> u64 {
         goldilocks_reduce128(a as u128 * b as u128)
     }
-
-    fn neg(a: u64) -> u64 {
-        if a == 0 { 0 } else { Self::MODULUS - a }
-    }
-
-    // Fermat's little theorem: a^(p-2) == a^-1 (mod p). Cheaper to hand-roll
-    // here than to round-trip through bigint's extended-gcd mod_inv.
-    fn inverse(a: u64) -> u64 {
-        assert!(a != 0, "cannot invert zero in a field");
-
-        let mut result = 1u64;
-        let mut base = a;
-        let mut e = Self::MODULUS - 2;
-
-        while e != 0 {
-            if e & 1 == 1 {
-                result = Self::mul(result, base);
-            }
-            base = Self::square(base);
-            e >>= 1;
-        }
-
-        result
-    }
-
-    fn one() -> u64 {
-        1
-    }
 }
 
+pub type GoldilocksBackend = NativeArithmeticBackend<GoldilocksConfig>;
 pub type Goldilocks = Fp<GoldilocksBackend>;
 
 #[cfg(test)]
