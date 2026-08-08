@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Neg, Shr, ShrAssign, Sub};
 
+mod fp2;
+pub use fp2::{Fp2, Fp2Config};
+
 // The value should only satisfy this.
 pub trait FpRepr: Copy + PartialEq + ShrAssign<usize> {
     const ZERO: Self;
