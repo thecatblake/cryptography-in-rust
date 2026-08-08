@@ -64,7 +64,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Extension Fields
 
-* [ ] `Fp2`
+* [x] `Fp2`
 * [ ] `Fp6`
 * [ ] `Fp12`
 * [ ] Frobenius endomorphism
