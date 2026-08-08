@@ -521,8 +521,8 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 # Cross-Cutting: Performance
 
-* [ ] Benchmarking harness (`criterion`)
-* [ ] Montgomery field arithmetic
+* [x] Benchmarking harness (`criterion`)
+* [x] Montgomery field arithmetic
 * [ ] SIMD optimization (AVX2 / AVX-512 / NEON)
 * [ ] Parallel MSM
 * [ ] Parallel FFT
@@ -533,6 +533,22 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] `no_std` support
 * [ ] WASM target support
 * [ ] Profiling (`perf`, `flamegraph`)
+
+### Benchmark Results
+
+Run via `cargo bench --workspace`. Median timings from `criterion`; local-machine numbers, not portable across hardware — useful for relative comparison between backends, not absolute performance claims.
+
+| op | BabyBear (Montgomery, u32) | Goldilocks (native, u64) | `Fp<U256>` DefaultBackend | `Fp<U256>` MontBackend |
+|---|---|---|---|---|
+| add | 629 ps | 552 ps | 1.60 ns | 1.60 ns |
+| sub | 563 ps | 556 ps | 1.84 ns | 1.77 ns |
+| mul | 737 ps | 660 ps | 632 ns | 20.4 ns |
+| square | 527 ps | 592 ps | 601 ns | 19.9 ns |
+| neg | 336 ps | 341 ps | 1.60 ns | 1.60 ns |
+| inverse | 88.5 ns | 229 ns | 877 ns | 921 ns |
+| pow | 81.6 ns | 98.9 ns | 408 µs | 8.64 µs |
+
+Montgomery reduction cuts `Fp<U256>` `mul` from 632ns to 20.4ns (~31x) by replacing a division with multiply+shift. BabyBear and Goldilocks are a further order of magnitude faster than `Fp<U256>` since they operate on a single machine word instead of a multi-limb bigint.
 
 ---
 
