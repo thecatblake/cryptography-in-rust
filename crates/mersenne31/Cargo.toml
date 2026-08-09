@@ -14,3 +14,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "mersenne31_ops"
 harness = false
+
+[[bench]]
+name = "mersenne31_ext_ops"
+harness = false

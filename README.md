@@ -550,6 +550,45 @@ Run via `cargo bench --workspace`. Median timings from `criterion`; local-machin
 
 Montgomery reduction cuts `Fp<U256>` `mul` from 632ns to 20.4ns (~31x) by replacing a division with multiply+shift. BabyBear and Goldilocks are a further order of magnitude faster than `Fp<U256>` since they operate on a single machine word instead of a multi-limb bigint.
 
+### Extension Field Benchmark Results (Fp2 / Fp6 / Fp12)
+
+Run via `cargo bench --workspace`. Median timings from `criterion`; `Fp<U256>` uses `MontBackend` over the secp256k1 base field prime (see `field_ext_ops.rs`); same local-machine caveat as above.
+
+**Fp2**
+
+| op | BabyBear | Goldilocks | Mersenne31 | `Fp<U256>` MontBackend |
+|---|---|---|---|---|
+| add | 843 ps | 803 ps | 846 ps | 3.19 ns |
+| sub | 841 ps | 795 ps | 837 ps | 5.92 ns |
+| mul | 2.48 ns | 3.54 ns | 2.53 ns | 99.3 ns |
+| square | 2.37 ns | 3.30 ns | 2.39 ns | 95.9 ns |
+| neg | 585 ps | 567 ps | 560 ps | 3.43 ns |
+| inverse | 112 ns | 249 ns | 89.6 ns | 1.04 µs |
+
+**Fp6**
+
+| op | BabyBear | Goldilocks | Mersenne31 | `Fp<U256>` MontBackend |
+|---|---|---|---|---|
+| add | 2.23 ns | 2.82 ns | 2.12 ns | 16.0 ns |
+| sub | 2.24 ns | 2.68 ns | 2.16 ns | 19.8 ns |
+| mul | 26.5 ns | 34.8 ns | 29.2 ns | 807 ns |
+| square | 26.4 ns | 34.4 ns | 29.2 ns | 806 ns |
+| neg | 1.51 ns | 1.69 ns | 1.43 ns | 11.0 ns |
+| inverse | 174 ns | 310 ns | 167 ns | 2.06 µs |
+
+**Fp12**
+
+| op | BabyBear | Goldilocks | Mersenne31 | `Fp<U256>` MontBackend |
+|---|---|---|---|---|
+| add | 4.34 ns | 6.82 ns | 4.38 ns | 45.9 ns |
+| sub | 4.33 ns | 4.76 ns | 4.21 ns | 58.1 ns |
+| mul | 119 ns | 153 ns | 170 ns | 3.30 µs |
+| square | 118 ns | 152 ns | 168 ns | 3.24 µs |
+| neg | 2.84 ns | 3.26 ns | 2.91 ns | 31.7 ns |
+| inverse | 320 ns | 491 ns | 388 ns | 6.37 µs |
+
+`mul`/`square`/`inverse` grow roughly 3x per tower level (Fp2 → Fp6 → Fp12) on the small fields, tracking the Karatsuba mul cost (3 base muls at Fp2, 6 at Fp6, 3 Fp6-muls at Fp12) plus the extra field inversion each `inverse` call chains through. `Fp<U256>`'s multi-limb `mul` dominates every tower level, same as it does for the base field above.
+
 ---
 
 # Cross-Cutting: Security Hygiene

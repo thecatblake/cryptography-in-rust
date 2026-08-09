@@ -1,6 +1,9 @@
 use field_core::{Fp, MontFieldConfig, MontWideBackend};
 
-pub use field_core::FpBackend;
+pub use field_core::{Field, FpBackend, Frobenius};
+
+mod extension;
+pub use extension::{BabyBearFp2, BabyBearFp6, BabyBearFp12};
 
 // The BabyBear prime, p = 2^31 - 2^27 + 1 = 15*2^27 + 1. Represented as u32
 // (unlike Goldilocks' u64, since p fits in 31 bits) to match how real

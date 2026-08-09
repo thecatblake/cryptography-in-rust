@@ -14,3 +14,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "babybear_ops"
 harness = false
+
+[[bench]]
+name = "babybear_ext_ops"
+harness = false

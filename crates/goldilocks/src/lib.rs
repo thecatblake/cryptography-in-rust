@@ -1,6 +1,9 @@
 use field_core::{Fp, WideArithmeticBackend, WideFieldConfig};
 
-pub use field_core::FpBackend;
+pub use field_core::{Field, FpBackend, Frobenius};
+
+mod extension;
+pub use extension::{GoldilocksFp2, GoldilocksFp6, GoldilocksFp12};
 
 // The Goldilocks prime, p = 2^64 - 2^32 + 1. Fits in a single u64 limb, so
 // this backend skips bigint entirely and does arithmetic on the machine word.

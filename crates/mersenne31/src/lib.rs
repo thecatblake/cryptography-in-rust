@@ -1,6 +1,9 @@
 use field_core::{Fp, WideArithmeticBackend, WideFieldConfig};
 
-pub use field_core::FpBackend;
+pub use field_core::{Field, FpBackend, Frobenius};
+
+mod extension;
+pub use extension::{Mersenne31Fp2, Mersenne31Fp6, Mersenne31Fp12};
 
 // The Mersenne31 prime, p = 2^31 - 1. Being a Mersenne prime means
 // 2^31 == 1 (mod p) by construction (p + 1 = 2^31), so a product's full
@@ -153,3 +156,4 @@ mod tests {
         }
     }
 }
+

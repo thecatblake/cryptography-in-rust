@@ -15,3 +15,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "field_ops"
 harness = false
+
+[[bench]]
+name = "field_ext_ops"
+harness = false
