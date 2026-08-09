@@ -1,4 +1,9 @@
-use crate::{Fp, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig, QuadExtFrobeniusConfig};
+use crate::{
+    Field,
+    QuadExt,
+    QuadExtConfig,
+    QuadExtFrobeniusConfig,
+};
 
 // Fp2Config extends MontFieldConfig with the one extra constant a quadratic
 // extension needs: Fp2 = Fp[u] / (u^2 - BETA). The MontFieldConfig
@@ -10,7 +15,8 @@ use crate::{Fp, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig, QuadEx
 // compile time via Fp::new being a const fn, so it's a genuine associated
 // constant -- no conversion or wrapping happens at the use site, same as
 // referencing MontFieldConfig::MODULUS/R2/N_PRIME directly.
-pub trait Fp2Config: MontFieldConfig + Sized {
+pub trait Fp2Config: Sized {
+	type Base: Field;
     // Must be a quadratic non-residue mod Self::MODULUS, or u^2 - BETA
     // factors and Fp2 collapses to Fp x Fp instead of being a field.
     //
@@ -18,7 +24,7 @@ pub trait Fp2Config: MontFieldConfig + Sized {
     // Self::MODULUS)) (see field_core::to_mont_u32 et al.): the plain,
     // canonical residue goes in, and the Montgomery-form conversion runs at
     // compile time as part of evaluating this const, not at runtime.
-    const BETA: Fp<MontWideBackend<Self>>;
+    const BETA: Self::Base;
 
     // Frobenius on Fp2 sends u to u^p: since u^2 == BETA, u^p =
     // u * (u^2)^((p-1)/2) = FROBENIUS_COEFF * u, so
@@ -31,14 +37,14 @@ pub trait Fp2Config: MontFieldConfig + Sized {
     // form, and pow_mont_uNN's square-and-multiply keeps the result there
     // too, so the whole exponentiation runs at compile time as part of
     // evaluating this const, not at runtime.
-    const FROBENIUS_COEFF: Fp<MontWideBackend<Self>>;
+    const FROBENIUS_COEFF: Self::Base;
 }
 
 // Every Fp2Config is a QuadExtConfig with Base fixed to the Montgomery
 // backend's Fp -- this is what lets Fp2<C> below be a plain alias for
 // QuadExt<C> instead of a hand-rolled struct with its own arithmetic impls.
 impl<C: Fp2Config> QuadExtConfig for C {
-    type Base = Fp<MontWideBackend<C>>;
+    type Base = C::Base;
 
     const BETA: Self::Base = <C as Fp2Config>::BETA;
 }
@@ -61,8 +67,15 @@ pub type Fp2<C> = QuadExt<C>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Frobenius, pow_mont_u32, to_mont_u32};
     use proptest::prelude::*;
+    use crate::{
+    	Fp,
+    	Frobenius,
+    	MontFieldConfig,
+        MontWideBackend,
+        pow_mont_u32,
+        to_mont_u32,
+	};
 
     // Same shape as field's Mod17Mont test fixture, just u32-native instead
     // of U256: p = 17, R = 2^32.
@@ -83,23 +96,25 @@ mod tests {
     const BETA_CANONICAL: u32 = 3;
 
     impl Fp2Config for Mod17Mont {
-        // QRs mod 17 are {1,2,4,8,9,13,15,16}; 3 isn't among them, so
-        // u^2 - 3 is irreducible over F17. BETA_CANONICAL (the plain
-        // residue) goes in; to_mont_u32 converts it to Montgomery form as
-        // part of evaluating this const, at compile time.
-        const BETA: Fp<MontWideBackend<Self>> =
-            Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
-
-        // t = BETA^((p-1)/2) = 3^8 mod 17 = 16 = -1 mod 17 -- expected by
-        // Euler's criterion, since BETA is a quadratic non-residue.
-        const FROBENIUS_COEFF: Fp<MontWideBackend<Self>> = Fp::new(pow_mont_u32(
-            <Self as Fp2Config>::BETA.value,
-            (Self::MODULUS - 1) / 2,
-            Self::R2,
-            Self::N_PRIME,
-            Self::MODULUS,
+        type Base = Fp<MontWideBackend<Self>>;
+        
+        const BETA: Self::Base =
+        	Fp::new(to_mont_u32(
+            	BETA_CANONICAL,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
         ));
-    }
+
+    	const FROBENIUS_COEFF: Self::Base =
+        	Fp::new(pow_mont_u32(
+                <Self as Fp2Config>::BETA.value,
+                (Self::MODULUS - 1) / 2,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
+        	));
+	}
 
     type Backend = MontWideBackend<Mod17Mont>;
     type F17 = Fp<Backend>;
@@ -340,8 +355,4 @@ mod tests {
             prop_assert_eq!(canonical(lhs.c1), canonical(rhs.c1));
         }
     }
-
-    // TODO: mont_add/sub/mul/neg-style cross-checks against a
-    // non-Montgomery Fp2, mirroring field's DefaultBackend/MontBackend
-    // parity tests.
 }
