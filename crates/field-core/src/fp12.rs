@@ -38,7 +38,9 @@ pub type Fp12<C> = QuadExt<Fp12Marker<C>>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Fp, Fp2, Fp2Config, MontFieldConfig, MontWideBackend, to_mont_u32};
+    use crate::{
+        Fp, Fp2, Fp2Config, MontFieldConfig, MontWideBackend, pow_mont_fp2_u32, pow_mont_u32, to_mont_u32,
+    };
     use proptest::prelude::*;
 
     // Same Mod17Mont fixture as fp2's/fp6's tests: p = 17, R = 2^32.
@@ -56,6 +58,15 @@ mod tests {
     impl Fp2Config for Mod17Mont {
         const BETA: Fp<MontWideBackend<Self>> =
             Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
+
+        // See fp2's Mod17Mont fixture: BETA^((p-1)/2) = 3^8 mod 17 = 16.
+        const FROBENIUS_COEFF: Fp<MontWideBackend<Self>> = Fp::new(pow_mont_u32(
+            <Self as Fp2Config>::BETA.value,
+            (Self::MODULUS - 1) / 2,
+            Self::R2,
+            Self::N_PRIME,
+            Self::MODULUS,
+        ));
     }
 
     const XI_CANONICAL: (u32, u32) = (1, 1);
@@ -64,6 +75,34 @@ mod tests {
         const XI: Fp2<Self> = Fp2 {
             c0: Fp::new(to_mont_u32(XI_CANONICAL.0, Self::R2, Self::N_PRIME, Self::MODULUS)),
             c1: Fp::new(to_mont_u32(XI_CANONICAL.1, Self::R2, Self::N_PRIME, Self::MODULUS)),
+        };
+
+        // 17 mod 3 == 2, so these aren't Fp6's actual Frobenius
+        // coefficients -- see fp6's Mod17Mont fixture for the same caveat.
+        // Present only so Mod17Mont satisfies Fp6Config here.
+        const FROBENIUS_COEFF_C1: Fp2<Self> = {
+            let (c0, c1) = pow_mont_fp2_u32(
+                <Self as Fp6Config>::XI.c0.value,
+                <Self as Fp6Config>::XI.c1.value,
+                (Self::MODULUS - 1) / 3,
+                <Self as Fp2Config>::BETA.value,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
+            );
+            Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) }
+        };
+        const FROBENIUS_COEFF_C2: Fp2<Self> = {
+            let (c0, c1) = pow_mont_fp2_u32(
+                <Self as Fp6Config>::XI.c0.value,
+                <Self as Fp6Config>::XI.c1.value,
+                2 * ((Self::MODULUS - 1) / 3),
+                <Self as Fp2Config>::BETA.value,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
+            );
+            Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) }
         };
     }
 

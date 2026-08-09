@@ -1,4 +1,4 @@
-use crate::{CubicExt, CubicExtConfig, Fp2, Fp2Config};
+use crate::{CubicExt, CubicExtConfig, Fp2, Fp2Config, Frobenius};
 
 // Fp6Config extends Fp2Config with the one extra constant a cubic extension
 // needs: Fp6 = Fp2[v] / (v^3 - XI). Fp2Config already supplies everything
@@ -9,6 +9,26 @@ pub trait Fp6Config: Fp2Config + Sized {
     // v^3 - XI factors and Fp6 collapses into Fp2 x Fp2 x Fp2 instead of
     // being a field.
     const XI: Fp2<Self>;
+
+    // Frobenius on Fp6 sends v to v^p: since v^3 == XI, v^p =
+    // v * (v^3)^((p-1)/3) = FROBENIUS_COEFF_C1 * v, and v^(2p) =
+    // (v^p)^2 = FROBENIUS_COEFF_C2 * v^2 (see the Frobenius impl below).
+    // Requires p == 1 (mod 3), so (p-1)/3 is an integer -- true for any
+    // pairing-friendly modulus (BN254, BLS12-381, ...); a modulus that
+    // doesn't satisfy it can still implement this trait (Rust integer
+    // division truncates instead of failing to compile), but the result
+    // isn't Fp6's actual Frobenius coefficient.
+    //
+    // Write these as Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) } wrapping the
+    // (c0, c1) pair returned by pow_mont_fp2_uNN(<Self as Fp6Config>::XI.c0.value,
+    // <Self as Fp6Config>::XI.c1.value, (Self::MODULUS - 1) / 3,
+    // <Self as Fp2Config>::BETA.value, Self::R2, Self::N_PRIME,
+    // Self::MODULUS) (see field_core::pow_mont_fp2_u32 et al.) --
+    // FROBENIUS_COEFF_C2 uses twice that exponent. XI is already in
+    // Montgomery form, and pow_mont_fp2_uNN's square-and-multiply keeps
+    // the result there too, so both run entirely at compile time.
+    const FROBENIUS_COEFF_C1: Fp2<Self>;
+    const FROBENIUS_COEFF_C2: Fp2<Self>;
 }
 
 // Every Fp6Config is a CubicExtConfig with Base fixed to Fp2<Self> -- this
@@ -26,10 +46,29 @@ impl<C: Fp6Config> CubicExtConfig for C {
 // CubicExt, not reimplemented here.
 pub type Fp6<C> = CubicExt<C>;
 
+// Frobenius on Fp6 = Fp2[v]/(v^3-XI): x^p for x = c0 + c1*v + c2*v^2
+// expands, using that Frobenius is additive and Fp2-semilinear over itself
+// (c0^p, c1^p, c2^p are each c_i.frobenius(), the Fp2 Frobenius from
+// fp2.rs), to c0^p + c1^p*v^p + c2^p*v^(2p). v^p and v^(2p) reduce to
+// FROBENIUS_COEFF_C1*v and FROBENIUS_COEFF_C2*v^2 respectively by
+// Fp6Config's definitions, so this is c0.frobenius() +
+// (FROBENIUS_COEFF_C1*c1.frobenius())*v +
+// (FROBENIUS_COEFF_C2*c2.frobenius())*v^2 -- two Fp2 multiplies, no
+// exponentiation at runtime.
+impl<C: Fp6Config> Frobenius for Fp6<C> {
+    fn frobenius(self) -> Self {
+        Fp6::new(
+            self.c0.frobenius(),
+            C::FROBENIUS_COEFF_C1 * self.c1.frobenius(),
+            C::FROBENIUS_COEFF_C2 * self.c2.frobenius(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Fp, MontFieldConfig, MontWideBackend, to_mont_u32};
+    use crate::{Fp, MontFieldConfig, MontWideBackend, pow_mont_fp2_u32, pow_mont_u32, to_mont_u32};
     use proptest::prelude::*;
 
     // Same Mod17Mont fixture as fp2's tests: p = 17, R = 2^32.
@@ -47,6 +86,15 @@ mod tests {
     impl Fp2Config for Mod17Mont {
         const BETA: Fp<MontWideBackend<Self>> =
             Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
+
+        // See fp2's Mod17Mont fixture: BETA^((p-1)/2) = 3^8 mod 17 = 16.
+        const FROBENIUS_COEFF: Fp<MontWideBackend<Self>> = Fp::new(pow_mont_u32(
+            <Self as Fp2Config>::BETA.value,
+            (Self::MODULUS - 1) / 2,
+            Self::R2,
+            Self::N_PRIME,
+            Self::MODULUS,
+        ));
     }
 
     // Canonical (non-Montgomery) coordinates of Mod17Mont::XI, used by tests
@@ -60,6 +108,36 @@ mod tests {
         const XI: Fp2<Self> = Fp2 {
             c0: Fp::new(to_mont_u32(XI_CANONICAL.0, Self::R2, Self::N_PRIME, Self::MODULUS)),
             c1: Fp::new(to_mont_u32(XI_CANONICAL.1, Self::R2, Self::N_PRIME, Self::MODULUS)),
+        };
+
+        // 17 mod 3 == 2, so (p-1)/3 isn't an integer here and these two
+        // constants aren't Fp6's actual Frobenius coefficients -- they're
+        // only present so Mod17Mont satisfies Fp6Config for the existing
+        // non-Frobenius tests below. Frobenius-specific tests use Mod13Mont
+        // instead, where p == 1 (mod 3) holds.
+        const FROBENIUS_COEFF_C1: Fp2<Self> = {
+            let (c0, c1) = pow_mont_fp2_u32(
+                <Self as Fp6Config>::XI.c0.value,
+                <Self as Fp6Config>::XI.c1.value,
+                (Self::MODULUS - 1) / 3,
+                <Self as Fp2Config>::BETA.value,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
+            );
+            Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) }
+        };
+        const FROBENIUS_COEFF_C2: Fp2<Self> = {
+            let (c0, c1) = pow_mont_fp2_u32(
+                <Self as Fp6Config>::XI.c0.value,
+                <Self as Fp6Config>::XI.c1.value,
+                2 * ((Self::MODULUS - 1) / 3),
+                <Self as Fp2Config>::BETA.value,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
+            );
+            Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) }
         };
     }
 
@@ -218,6 +296,207 @@ mod tests {
             prop_assert_eq!(canonical2(product.c0), (1, 0));
             prop_assert_eq!(canonical2(product.c1), (0, 0));
             prop_assert_eq!(canonical2(product.c2), (0, 0));
+        }
+    }
+
+    // Frobenius needs p == 1 (mod 3) for FROBENIUS_COEFF_C1/C2's (p-1)/3
+    // exponent to be meaningful (see Fp6Config's doc comment) -- Mod17Mont
+    // above doesn't satisfy that (17 mod 3 == 2), so these tests use a
+    // dedicated small modulus that does, in its own module to avoid
+    // colliding with Mod17Mont's fe/canonical/etc. helpers above.
+    mod frobenius {
+        use super::*;
+
+        // p = 13 == 1 (mod 3), R = 2^32. R2/N_PRIME computed offline the
+        // same way as Mod17Mont's (see field's Mod17Mont for the
+        // derivation approach) and round-trip verified below.
+        struct Mod13Mont;
+        impl MontFieldConfig for Mod13Mont {
+            type Repr = u32;
+
+            const MODULUS: u32 = 13;
+            const R2: u32 = 0x3;
+            const N_PRIME: u32 = 0x3b13_b13b;
+        }
+
+        const BETA_CANONICAL: u32 = 2;
+
+        impl Fp2Config for Mod13Mont {
+            // QRs mod 13 are {1,3,4,9,10,12}; 2 isn't among them, so
+            // u^2 - 2 is irreducible over F13.
+            const BETA: Fp<MontWideBackend<Self>> =
+                Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
+
+            const FROBENIUS_COEFF: Fp<MontWideBackend<Self>> = Fp::new(pow_mont_u32(
+                <Self as Fp2Config>::BETA.value,
+                (Self::MODULUS - 1) / 2,
+                Self::R2,
+                Self::N_PRIME,
+                Self::MODULUS,
+            ));
+        }
+
+        // Canonical (non-Montgomery) coordinates of Mod13Mont::XI, used by
+        // frobenius_coeff_*_matches_expected_value below.
+        const XI_CANONICAL: (u32, u32) = (0, 1);
+
+        impl Fp6Config for Mod13Mont {
+            // Verified offline: among the 168 = 13^2-1 nonzero elements of
+            // F13^2, only 56 are cubes, and u isn't one of them, so
+            // v^3 - u is irreducible over F13^2.
+            const XI: Fp2<Self> = Fp2 {
+                c0: Fp::new(to_mont_u32(XI_CANONICAL.0, Self::R2, Self::N_PRIME, Self::MODULUS)),
+                c1: Fp::new(to_mont_u32(XI_CANONICAL.1, Self::R2, Self::N_PRIME, Self::MODULUS)),
+            };
+
+            const FROBENIUS_COEFF_C1: Fp2<Self> = {
+                let (c0, c1) = pow_mont_fp2_u32(
+                    <Self as Fp6Config>::XI.c0.value,
+                    <Self as Fp6Config>::XI.c1.value,
+                    (Self::MODULUS - 1) / 3,
+                    <Self as Fp2Config>::BETA.value,
+                    Self::R2,
+                    Self::N_PRIME,
+                    Self::MODULUS,
+                );
+                Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) }
+            };
+            const FROBENIUS_COEFF_C2: Fp2<Self> = {
+                let (c0, c1) = pow_mont_fp2_u32(
+                    <Self as Fp6Config>::XI.c0.value,
+                    <Self as Fp6Config>::XI.c1.value,
+                    2 * ((Self::MODULUS - 1) / 3),
+                    <Self as Fp2Config>::BETA.value,
+                    Self::R2,
+                    Self::N_PRIME,
+                    Self::MODULUS,
+                );
+                Fp2 { c0: Fp::new(c0), c1: Fp::new(c1) }
+            };
+        }
+
+        type Backend = MontWideBackend<Mod13Mont>;
+        type F13 = Fp<Backend>;
+        type F13_2 = Fp2<Mod13Mont>;
+        type F13_6 = Fp6<Mod13Mont>;
+
+        fn fe(v: u32) -> F13 {
+            F13::new(Backend::to_mont(v % 13))
+        }
+
+        fn canonical(x: F13) -> u32 {
+            Backend::from_mont(x.value)
+        }
+
+        fn fe2(c0: u32, c1: u32) -> F13_2 {
+            Fp2::new(fe(c0), fe(c1))
+        }
+
+        fn canonical2(x: F13_2) -> (u32, u32) {
+            (canonical(x.c0), canonical(x.c1))
+        }
+
+        fn fe6(c0: (u32, u32), c1: (u32, u32), c2: (u32, u32)) -> F13_6 {
+            Fp6::new(fe2(c0.0, c0.1), fe2(c1.0, c1.1), fe2(c2.0, c2.1))
+        }
+
+        fn canonical6(x: F13_6) -> ((u32, u32), (u32, u32), (u32, u32)) {
+            (canonical2(x.c0), canonical2(x.c1), canonical2(x.c2))
+        }
+
+        // x^e via straight-line repeated multiplication (not
+        // square-and-multiply) -- deliberately the most naive possible
+        // implementation of exponentiation, so it can serve as an
+        // independent check on frobenius() below rather than sharing any
+        // code path with it.
+        fn pow_by_repeated_mul(a: F13_6, e: u32) -> F13_6 {
+            let mut result = a;
+            for _ in 1..e {
+                result = result * a;
+            }
+            result
+        }
+
+        #[test]
+        fn frobenius_coeff_c1_matches_expected_value() {
+            // t = XI^((p-1)/3) = u^4 mod 13 = 4 (verified offline).
+            assert_eq!(canonical2(<Mod13Mont as Fp6Config>::FROBENIUS_COEFF_C1), (4, 0));
+        }
+
+        #[test]
+        fn frobenius_coeff_c2_matches_expected_value() {
+            // t^2 = XI^(2(p-1)/3) = u^8 mod 13 = 3 (verified offline).
+            assert_eq!(canonical2(<Mod13Mont as Fp6Config>::FROBENIUS_COEFF_C2), (3, 0));
+        }
+
+        #[test]
+        fn frobenius_matches_x_to_the_p() {
+            // The defining property of Frobenius: frobenius(x) == x^p.
+            // Checked against pow_by_repeated_mul, which shares no code
+            // with the formula-based frobenius() implementation.
+            let a = fe6((1, 2), (3, 4), (5, 6));
+
+            let via_formula = a.frobenius();
+            let via_repeated_mul = pow_by_repeated_mul(a, 13);
+
+            assert_eq!(canonical6(via_formula), canonical6(via_repeated_mul));
+        }
+
+        #[test]
+        fn frobenius_fixes_the_base_field_embedding() {
+            // Fp embeds into Fp6 as c0's own c0 slot with everything else
+            // zero (c0 = (5, 0) is a plain Fp element, not a general Fp2
+            // one); Frobenius must fix it pointwise, same as it fixes Fp
+            // itself and Fp2's own base-field embedding (verified in fp2's
+            // tests).
+            let a = fe6((5, 0), (0, 0), (0, 0));
+            let frob = a.frobenius();
+
+            assert_eq!(canonical2(frob.c0), canonical2(a.c0));
+            assert_eq!(canonical2(frob.c1), (0, 0));
+            assert_eq!(canonical2(frob.c2), (0, 0));
+        }
+
+        proptest! {
+            #[test]
+            fn frobenius_matches_x_to_the_p_proptest(
+                a0 in 0u32..13, a1 in 0u32..13, a2 in 0u32..13, a3 in 0u32..13, a4 in 0u32..13, a5 in 0u32..13,
+            ) {
+                let a = fe6((a0, a1), (a2, a3), (a4, a5));
+
+                let via_formula = a.frobenius();
+                let via_repeated_mul = pow_by_repeated_mul(a, 13);
+
+                prop_assert_eq!(canonical6(via_formula), canonical6(via_repeated_mul));
+            }
+
+            #[test]
+            fn frobenius_is_additive(
+                a0 in 0u32..13, a1 in 0u32..13, a2 in 0u32..13, a3 in 0u32..13, a4 in 0u32..13, a5 in 0u32..13,
+                b0 in 0u32..13, b1 in 0u32..13, b2 in 0u32..13, b3 in 0u32..13, b4 in 0u32..13, b5 in 0u32..13,
+            ) {
+                let a = fe6((a0, a1), (a2, a3), (a4, a5));
+                let b = fe6((b0, b1), (b2, b3), (b4, b5));
+
+                let lhs = (a + b).frobenius();
+                let rhs = a.frobenius() + b.frobenius();
+
+                prop_assert_eq!(canonical6(lhs), canonical6(rhs));
+            }
+
+            #[test]
+            fn frobenius_is_multiplicative(
+                a0 in 0u32..13, a1 in 0u32..13, a2 in 0u32..13, a3 in 0u32..13, a4 in 0u32..13, a5 in 0u32..13,
+                b0 in 0u32..13, b1 in 0u32..13, b2 in 0u32..13, b3 in 0u32..13, b4 in 0u32..13, b5 in 0u32..13,
+            ) {
+                let a = fe6((a0, a1), (a2, a3), (a4, a5));
+                let b = fe6((b0, b1), (b2, b3), (b4, b5));
+
+                let lhs = (a * b).frobenius();
+                let rhs = a.frobenius() * b.frobenius();
+
+                prop_assert_eq!(canonical6(lhs), canonical6(rhs));
+            }
         }
     }
 }

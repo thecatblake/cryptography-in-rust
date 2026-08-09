@@ -1,4 +1,4 @@
-use crate::{Fp, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig};
+use crate::{Fp, Frobenius, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig};
 
 // Fp2Config extends MontFieldConfig with the one extra constant a quadratic
 // extension needs: Fp2 = Fp[u] / (u^2 - BETA). The MontFieldConfig
@@ -19,6 +19,19 @@ pub trait Fp2Config: MontFieldConfig + Sized {
     // canonical residue goes in, and the Montgomery-form conversion runs at
     // compile time as part of evaluating this const, not at runtime.
     const BETA: Fp<MontWideBackend<Self>>;
+
+    // Frobenius on Fp2 sends u to u^p: since u^2 == BETA, u^p =
+    // u * (u^2)^((p-1)/2) = FROBENIUS_COEFF * u, so
+    // frobenius(c0 + c1*u) = c0 + (FROBENIUS_COEFF*c1)*u (see the Frobenius
+    // impl below).
+    //
+    // Write this as Fp::new(pow_mont_uNN(<Self as Fp2Config>::BETA.value,
+    // (Self::MODULUS - 1) / 2, Self::R2, Self::N_PRIME, Self::MODULUS))
+    // (see field_core::pow_mont_u32 et al.): BETA is already in Montgomery
+    // form, and pow_mont_uNN's square-and-multiply keeps the result there
+    // too, so the whole exponentiation runs at compile time as part of
+    // evaluating this const, not at runtime.
+    const FROBENIUS_COEFF: Fp<MontWideBackend<Self>>;
 }
 
 // Every Fp2Config is a QuadExtConfig with Base fixed to the Montgomery
@@ -36,10 +49,22 @@ impl<C: Fp2Config> QuadExtConfig for C {
 // all come from QuadExt, not reimplemented here.
 pub type Fp2<C> = QuadExt<C>;
 
+// Frobenius on Fp2 = Fp[u]/(u^2-BETA): x^p for x = c0 + c1*u expands, using
+// that Frobenius is additive and fixes Fp itself (Fp's Frobenius impl is
+// the identity, by Fermat's little theorem), to c0^p + c1^p*u^p = c0 +
+// c1*u^p. u^p reduces to FROBENIUS_COEFF*u by Fp2Config::FROBENIUS_COEFF's
+// definition, so this is c0 + (FROBENIUS_COEFF*c1)*u -- one base-field
+// multiply, no exponentiation at runtime.
+impl<C: Fp2Config> Frobenius for Fp2<C> {
+    fn frobenius(self) -> Self {
+        Fp2::new(self.c0, C::FROBENIUS_COEFF * self.c1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::to_mont_u32;
+    use crate::{pow_mont_u32, to_mont_u32};
     use proptest::prelude::*;
 
     // Same shape as field's Mod17Mont test fixture, just u32-native instead
@@ -67,6 +92,16 @@ mod tests {
         // part of evaluating this const, at compile time.
         const BETA: Fp<MontWideBackend<Self>> =
             Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
+
+        // t = BETA^((p-1)/2) = 3^8 mod 17 = 16 = -1 mod 17 -- expected by
+        // Euler's criterion, since BETA is a quadratic non-residue.
+        const FROBENIUS_COEFF: Fp<MontWideBackend<Self>> = Fp::new(pow_mont_u32(
+            <Self as Fp2Config>::BETA.value,
+            (Self::MODULUS - 1) / 2,
+            Self::R2,
+            Self::N_PRIME,
+            Self::MODULUS,
+        ));
     }
 
     type Backend = MontWideBackend<Mod17Mont>;
@@ -230,6 +265,82 @@ mod tests {
 
             prop_assert_eq!(canonical(product.c0), 1);
             prop_assert_eq!(canonical(product.c1), 0);
+        }
+    }
+
+    #[test]
+    fn frobenius_coeff_matches_euler_criterion() {
+        // BETA is a quadratic non-residue mod 17, so BETA^((p-1)/2) == -1.
+        assert_eq!(canonical(<Mod17Mont as Fp2Config>::FROBENIUS_COEFF), 16);
+    }
+
+    #[test]
+    fn frobenius_matches_conjugate_for_a_quadratic_extension() {
+        // FROBENIUS_COEFF == -1 here (see the test above), so frobenius
+        // collapses to conjugation -- true for any genuine Fp2, since
+        // Euler's criterion always makes a non-residue's ((p-1)/2)th power
+        // -1, never some other coefficient.
+        let a = fe2(3, 5);
+        let frob = a.frobenius();
+        let conjugate = fe2(3, 0) - fe2(0, 5);
+
+        assert_eq!(canonical(frob.c0), canonical(conjugate.c0));
+        assert_eq!(canonical(frob.c1), canonical(conjugate.c1));
+    }
+
+    #[test]
+    fn frobenius_fixes_the_base_field_embedding() {
+        // c1 = 0 is Fp embedded in Fp2; Frobenius must fix it pointwise.
+        let a = fe2(5, 0);
+        let frob = a.frobenius();
+
+        assert_eq!(canonical(frob.c0), canonical(a.c0));
+        assert_eq!(canonical(frob.c1), 0);
+    }
+
+    proptest! {
+        #[test]
+        fn frobenius_matches_formula(c0 in 0u32..17, c1 in 0u32..17) {
+            let frob = fe2(c0, c1).frobenius();
+
+            let expected_c1 = (c1 * 16) % 17; // c1 * FROBENIUS_COEFF
+            prop_assert_eq!(canonical(frob.c0), c0);
+            prop_assert_eq!(canonical(frob.c1), expected_c1);
+        }
+
+        #[test]
+        fn frobenius_is_an_involution(c0 in 0u32..17, c1 in 0u32..17) {
+            // [Fp2:Fp] = 2, so applying Frobenius twice computes x^(p^2),
+            // which is the identity on Fp2.
+            let a = fe2(c0, c1);
+            let twice = a.frobenius().frobenius();
+
+            prop_assert_eq!(canonical(twice.c0), canonical(a.c0));
+            prop_assert_eq!(canonical(twice.c1), canonical(a.c1));
+        }
+
+        #[test]
+        fn frobenius_is_additive(a0 in 0u32..17, a1 in 0u32..17, b0 in 0u32..17, b1 in 0u32..17) {
+            let a = fe2(a0, a1);
+            let b = fe2(b0, b1);
+
+            let lhs = (a + b).frobenius();
+            let rhs = a.frobenius() + b.frobenius();
+
+            prop_assert_eq!(canonical(lhs.c0), canonical(rhs.c0));
+            prop_assert_eq!(canonical(lhs.c1), canonical(rhs.c1));
+        }
+
+        #[test]
+        fn frobenius_is_multiplicative(a0 in 0u32..17, a1 in 0u32..17, b0 in 0u32..17, b1 in 0u32..17) {
+            let a = fe2(a0, a1);
+            let b = fe2(b0, b1);
+
+            let lhs = (a * b).frobenius();
+            let rhs = a.frobenius() * b.frobenius();
+
+            prop_assert_eq!(canonical(lhs.c0), canonical(rhs.c0));
+            prop_assert_eq!(canonical(lhs.c1), canonical(rhs.c1));
         }
     }
 

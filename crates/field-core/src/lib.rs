@@ -259,6 +259,170 @@ impl_const_to_mont!(to_mont_u16, u16, u32);
 impl_const_to_mont!(to_mont_u32, u32, u64);
 impl_const_to_mont!(to_mont_u64, u64, u128);
 
+// Const-evaluable modular exponentiation on Montgomery-form values, one per
+// primitive width (mirrors impl_const_to_mont! above, for the same reason:
+// a fully generic const version can't exist on stable Rust, since it would
+// need const trait dispatch through WideInt). Given `base` already in
+// Montgomery form, computes base^exp via square-and-multiply, using a local
+// mont_mul (same REDC steps as impl_const_to_mont!'s inline reduction) so
+// the loop can reduce after both the squaring and the conditional multiply
+// without duplicating those steps. Lets a Fp2Config implementor write
+// FROBENIUS_COEFF as pow_mont_uNN(<Self as Fp2Config>::BETA.value,
+// (Self::MODULUS - 1) / 2, Self::R2, Self::N_PRIME, Self::MODULUS) --
+// BETA^((p-1)/2), entirely at compile time.
+macro_rules! impl_const_pow_mont {
+    ($name:ident, $repr:ty, $wide:ty) => {
+        pub const fn $name(base: $repr, exp: $repr, r2: $repr, n_prime: $repr, modulus: $repr) -> $repr {
+            const fn mont_mul(a: $repr, b: $repr, n_prime: $repr, modulus: $repr) -> $repr {
+                let t = (a as $wide) * (b as $wide);
+                let t_low = t as $repr;
+                let m = ((t_low as $wide) * (n_prime as $wide)) as $repr;
+
+                // t + m*modulus is guaranteed divisible by R by construction of m.
+                let sum = t + (m as $wide) * (modulus as $wide);
+                let quotient = sum >> <$repr>::BITS;
+
+                let modulus_wide = modulus as $wide;
+
+                (if quotient >= modulus_wide { quotient - modulus_wide } else { quotient }) as $repr
+            }
+
+            // Montgomery-form 1, i.e. REDC(1*R2) = REDC(R2) -- same value
+            // MontWideBackend::one produces at runtime -- seeds the
+            // square-and-multiply accumulator.
+            let mut result = mont_mul(1, r2, n_prime, modulus);
+            let mut b = base;
+            let mut e = exp;
+
+            while e != 0 {
+                if e & 1 == 1 {
+                    result = mont_mul(result, b, n_prime, modulus);
+                }
+                b = mont_mul(b, b, n_prime, modulus);
+                e >>= 1;
+            }
+
+            result
+        }
+    };
+}
+
+impl_const_pow_mont!(pow_mont_u8, u8, u16);
+impl_const_pow_mont!(pow_mont_u16, u16, u32);
+impl_const_pow_mont!(pow_mont_u32, u32, u64);
+impl_const_pow_mont!(pow_mont_u64, u64, u128);
+
+// Const-evaluable modular exponentiation of a Montgomery-form Fp2 element
+// (a0 + a1*u, u^2 = beta), one per primitive width -- the Fp2-level
+// counterpart to impl_const_pow_mont! above. Needed because an Fp6Config's
+// Frobenius coefficient (Fp2Config::FROBENIUS_COEFF is a base-field scalar,
+// but Fp6Config::FROBENIUS_COEFF_C1/C2 are Fp2 elements, XI^((p-1)/3) and
+// XI^(2(p-1)/3)) can't be computed by pow_mont_uNN alone: it needs
+// quadratic-extension multiplication, not just base-field multiplication,
+// and QuadExt::mul goes through Field's regular (non-const) trait methods.
+// So this hand-rolls the same Karatsuba shape as QuadExt::mul (qmul below)
+// plus mod-p add/sub, entirely in terms of the primitive-width REDC steps
+// already used by impl_const_pow_mont!, and runs square-and-multiply over
+// that. Lets a Fp6Config implementor write FROBENIUS_COEFF_C1 as
+// pow_mont_fp2_uNN(Self::XI.c0.value, Self::XI.c1.value,
+// (Self::MODULUS - 1) / 3, <Self as Fp2Config>::BETA.value, Self::R2,
+// Self::N_PRIME, Self::MODULUS) (see field_core::pow_mont_fp2_u32 et al.),
+// wrapping the returned (c0, c1) pair in Fp2 { c0: Fp::new(c0), c1:
+// Fp::new(c1) } -- FROBENIUS_COEFF_C2 uses twice that exponent.
+macro_rules! impl_const_pow_mont_fp2 {
+    ($name:ident, $repr:ty, $wide:ty) => {
+        pub const fn $name(
+            a0: $repr,
+            a1: $repr,
+            exp: $repr,
+            beta: $repr,
+            r2: $repr,
+            n_prime: $repr,
+            modulus: $repr,
+        ) -> ($repr, $repr) {
+            const fn mont_mul(a: $repr, b: $repr, n_prime: $repr, modulus: $repr) -> $repr {
+                let t = (a as $wide) * (b as $wide);
+                let t_low = t as $repr;
+                let m = ((t_low as $wide) * (n_prime as $wide)) as $repr;
+
+                // t + m*modulus is guaranteed divisible by R by construction of m.
+                let sum = t + (m as $wide) * (modulus as $wide);
+                let quotient = sum >> <$repr>::BITS;
+
+                let modulus_wide = modulus as $wide;
+
+                (if quotient >= modulus_wide { quotient - modulus_wide } else { quotient }) as $repr
+            }
+
+            const fn mont_add(a: $repr, b: $repr, modulus: $repr) -> $repr {
+                let sum = (a as $wide) + (b as $wide);
+                let modulus_wide = modulus as $wide;
+
+                (if sum >= modulus_wide { sum - modulus_wide } else { sum }) as $repr
+            }
+
+            const fn mont_sub(a: $repr, b: $repr, modulus: $repr) -> $repr {
+                let a = a as $wide;
+                let b = b as $wide;
+                let modulus_wide = modulus as $wide;
+
+                (if a >= b { a - b } else { a + modulus_wide - b }) as $repr
+            }
+
+            // Quadratic-extension Montgomery multiplication: same Karatsuba
+            // shape as QuadExt::mul (c0 = v0 + beta*v1, c1 = (a0+a1)(b0+b1)
+            // - v0 - v1), built from mont_mul/mont_add/mont_sub above.
+            const fn qmul(
+                a0: $repr,
+                a1: $repr,
+                b0: $repr,
+                b1: $repr,
+                beta: $repr,
+                n_prime: $repr,
+                modulus: $repr,
+            ) -> ($repr, $repr) {
+                let v0 = mont_mul(a0, b0, n_prime, modulus);
+                let v1 = mont_mul(a1, b1, n_prime, modulus);
+
+                let c0 = mont_add(v0, mont_mul(beta, v1, n_prime, modulus), modulus);
+                let cross =
+                    mont_mul(mont_add(a0, a1, modulus), mont_add(b0, b1, modulus), n_prime, modulus);
+                let c1 = mont_sub(mont_sub(cross, v0, modulus), v1, modulus);
+
+                (c0, c1)
+            }
+
+            // Montgomery-form (1, 0), the Fp2 multiplicative identity --
+            // seeds the square-and-multiply accumulator.
+            let mut result0 = mont_mul(1, r2, n_prime, modulus);
+            let mut result1: $repr = 0;
+
+            let mut base0 = a0;
+            let mut base1 = a1;
+            let mut e = exp;
+
+            while e != 0 {
+                if e & 1 == 1 {
+                    let (c0, c1) = qmul(result0, result1, base0, base1, beta, n_prime, modulus);
+                    result0 = c0;
+                    result1 = c1;
+                }
+                let (s0, s1) = qmul(base0, base1, base0, base1, beta, n_prime, modulus);
+                base0 = s0;
+                base1 = s1;
+                e >>= 1;
+            }
+
+            (result0, result1)
+        }
+    };
+}
+
+impl_const_pow_mont_fp2!(pow_mont_fp2_u8, u8, u16);
+impl_const_pow_mont_fp2!(pow_mont_fp2_u16, u16, u32);
+impl_const_pow_mont_fp2!(pow_mont_fp2_u32, u32, u64);
+impl_const_pow_mont_fp2!(pow_mont_fp2_u64, u64, u128);
+
 impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
     type Repr = T::Repr;
 
@@ -328,6 +492,20 @@ pub trait Field: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = S
     }
 
     fn inverse(self) -> Self;
+}
+
+// The Frobenius endomorphism x -> x^p, where p is the field's own prime
+// characteristic. On Fp itself this is the identity (Fermat's little
+// theorem: a^p == a for every a in Fp) -- the interesting cases are
+// extension fields, where x^p permutes basis coefficients instead of
+// fixing everything. Kept as its own trait rather than a defaulted method
+// on Field: an "identity by default" default would be silently wrong for
+// any extension that forgot to override it, and unlike square/inverse
+// there's no formula generic over an arbitrary Field -- each extension
+// needs its own extension-specific coefficient (see Fp2Config::
+// FROBENIUS_COEFF).
+pub trait Frobenius: Field {
+    fn frobenius(self) -> Self;
 }
 
 pub struct Fp<B: FpBackend> {
@@ -424,5 +602,12 @@ impl<B: FpBackend> Field for Fp<B> {
 
     fn inverse(self) -> Self {
         Fp::inverse(self)
+    }
+}
+
+impl<B: FpBackend> Frobenius for Fp<B> {
+    // Fermat's little theorem: a^p == a (mod p) for every a in Fp.
+    fn frobenius(self) -> Self {
+        self
     }
 }
