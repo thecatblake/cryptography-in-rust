@@ -66,7 +66,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 * [x] `Fp2`
 * [x] `Fp6`
-* [ ] `Fp12`
+* [x] `Fp12`
 * [ ] Frobenius endomorphism
 * [ ] Towering strategy and multiplication cost analysis
 

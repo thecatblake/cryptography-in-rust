@@ -13,6 +13,9 @@ pub use fp2::{Fp2, Fp2Config};
 mod fp6;
 pub use fp6::{Fp6, Fp6Config};
 
+mod fp12;
+pub use fp12::{Fp12, Fp12Config};
+
 // The value should only satisfy this.
 pub trait FpRepr: Copy + PartialEq + ShrAssign<usize> {
     const ZERO: Self;
