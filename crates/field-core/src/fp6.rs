@@ -77,7 +77,7 @@ mod tests {
     impl Fp2Config for Mod17Mont {
         type Base = Fp<MontWideBackend<Self>>;
         
-        const BETA: Self::Nase =
+        const BETA: Self::Base =
             Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
 
         // See fp2's Mod17Mont fixture: BETA^((p-1)/2) = 3^8 mod 17 = 16.
@@ -316,12 +316,13 @@ mod tests {
         const BETA_CANONICAL: u32 = 2;
 
         impl Fp2Config for Mod13Mont {
+            type Base = Fp<MontWideBackend<Self>>;
             // QRs mod 13 are {1,3,4,9,10,12}; 2 isn't among them, so
             // u^2 - 2 is irreducible over F13.
-            const BETA: Fp<MontWideBackend<Self>> =
+            const BETA: Self::Base =
                 Fp::new(to_mont_u32(BETA_CANONICAL, Self::R2, Self::N_PRIME, Self::MODULUS));
 
-            const FROBENIUS_COEFF: Fp<MontWideBackend<Self>> = Fp::new(pow_mont_u32(
+            const FROBENIUS_COEFF: Self::Base = Fp::new(pow_mont_u32(
                 <Self as Fp2Config>::BETA.value,
                 (Self::MODULUS - 1) / 2,
                 Self::R2,
