@@ -1,6 +1,4 @@
-use std::ops::{Add, Mul, Neg, Sub};
-
-use crate::{Fp, MontFieldConfig, MontWideBackend};
+use crate::{Fp, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig};
 
 // Fp2Config extends MontFieldConfig with the one extra constant a quadratic
 // extension needs: Fp2 = Fp[u] / (u^2 - BETA). The MontFieldConfig
@@ -23,93 +21,20 @@ pub trait Fp2Config: MontFieldConfig + Sized {
     const BETA: Fp<MontWideBackend<Self>>;
 }
 
-// Fp2 = Fp[u] / (u^2 - BETA), elements represented as c0 + c1*u.
-pub struct Fp2<C: Fp2Config> {
-    pub c0: Fp<MontWideBackend<C>>,
-    pub c1: Fp<MontWideBackend<C>>,
+// Every Fp2Config is a QuadExtConfig with Base fixed to the Montgomery
+// backend's Fp -- this is what lets Fp2<C> below be a plain alias for
+// QuadExt<C> instead of a hand-rolled struct with its own arithmetic impls.
+impl<C: Fp2Config> QuadExtConfig for C {
+    type Base = Fp<MontWideBackend<C>>;
+
+    const BETA: Self::Base = <C as Fp2Config>::BETA;
 }
 
-// Derived impls would require C: Clone/Copy, but only C::Repr needs to be
-// (FpRepr's Copy supertrait already guarantees that), so implement by hand
-// -- same reasoning as Fp<B>'s hand-written Clone/Copy in lib.rs.
-impl<C: Fp2Config> Clone for Fp2<C> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<C: Fp2Config> Copy for Fp2<C> {}
-
-impl<C: Fp2Config> Fp2<C> {
-    pub fn new(c0: Fp<MontWideBackend<C>>, c1: Fp<MontWideBackend<C>>) -> Self {
-        Fp2 { c0, c1 }
-    }
-
-    // N(a) = a * conjugate(a) = (c0+c1*u)(c0-c1*u) = c0^2 - c1^2*u^2, and
-    // u^2 == BETA by definition of Fp2, so this collapses to a base-field
-    // element. `inverse` below is defined in terms of it.
-    pub fn norm(self) -> Fp<MontWideBackend<C>> {
-        self.c0.square() - C::BETA * self.c1.square()
-    }
-
-    // Multiplicative inverse. For a = c0 + c1*u,
-    // a^-1 = conjugate(a) / norm(a) = (c0 - c1*u) * norm(a)^-1. The
-    // denominator is the same c0^2 - BETA*c1^2 as `norm`, computed in place
-    // here rather than via self.norm() since it's needed before the
-    // conjugate is built.
-    pub fn inverse(self) -> Self {
-        let denom_inv = (self.c0.square() - C::BETA * self.c1.square()).inverse();
-
-        Fp2::new(self.c0 * denom_inv, -(self.c1 * denom_inv))
-    }
-}
-
-impl<C: Fp2Config> Add for Fp2<C> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Fp2::new(self.c0 + rhs.c0, self.c1 + rhs.c1)
-    }
-}
-
-impl<C: Fp2Config> Sub for Fp2<C> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Fp2::new(self.c0 - rhs.c0, self.c1 - rhs.c1)
-    }
-}
-
-impl<C: Fp2Config> Neg for Fp2<C> {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Fp2::new(-self.c0, -self.c1)
-    }
-}
-
-// Karatsuba: schoolbook (a0+a1*u)(b0+b1*u) needs 4 base-field muls
-// (a0*b0, a1*b1, a0*b1, a1*b0). Naming v0 = a0*b0 and v1 = a1*b1, the two
-// cross terms' sum a0*b1 + a1*b0 equals (a0+a1)*(b0+b1) - v0 - v1, so only
-// one more mul -- not two -- is needed to get both of them at once:
-//   c0 = v0 + BETA*v1
-//   c1 = (a0+a1)*(b0+b1) - v0 - v1
-// 3 base-field muls total (v0, v1, and the cross-term product); the BETA
-// multiply is separate since BETA is a fixed constant, not one of the two
-// operands being multiplied together.
-impl<C: Fp2Config> Mul for Fp2<C> {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        let v0 = self.c0 * rhs.c0;
-        let v1 = self.c1 * rhs.c1;
-
-        let c0 = v0 + C::BETA * v1;
-        let c1 = (self.c0 + self.c1) * (rhs.c0 + rhs.c1) - v0 - v1;
-
-        Fp2::new(c0, c1)
-    }
-}
+// Fp2 = Fp[u] / (u^2 - BETA), elements represented as c0 + c1*u. A
+// specialization of QuadExt to a Montgomery-backend base field, via
+// Fp2Config's blanket QuadExtConfig impl above -- Add/Sub/Neg/Mul/inverse
+// all come from QuadExt, not reimplemented here.
+pub type Fp2<C> = QuadExt<C>;
 
 #[cfg(test)]
 mod tests {
@@ -168,7 +93,7 @@ mod tests {
 
     #[test]
     fn beta_matches_configured_value() {
-        assert_eq!(canonical(Mod17Mont::BETA), BETA_CANONICAL);
+        assert_eq!(canonical(<Mod17Mont as Fp2Config>::BETA), BETA_CANONICAL);
     }
 
     #[test]

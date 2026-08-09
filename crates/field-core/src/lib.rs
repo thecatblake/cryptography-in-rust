@@ -1,6 +1,12 @@
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Neg, Shr, ShrAssign, Sub};
 
+mod quad_ext;
+pub use quad_ext::{QuadExt, QuadExtConfig};
+
+mod cubic_ext;
+pub use cubic_ext::{CubicExt, CubicExtConfig};
+
 mod fp2;
 pub use fp2::{Fp2, Fp2Config};
 
@@ -304,6 +310,23 @@ impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
     }
 }
 
+// Field abstracts over "a ring QuadExt/CubicExt can be built on top of": the
+// four ring operations plus squaring and inversion. Fp<B> is the base case
+// below; QuadExt<C> and CubicExt<C> each implement it too (in terms of
+// their own Base: Field), which is what lets extensions stack on top of
+// each other -- e.g. a cubic extension of a quadratic one -- without
+// QuadExt/CubicExt needing to know anything Fp-specific about Base.
+pub trait Field: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Neg<Output = Self> {
+    // Defaults to self*self; Fp<B> overrides it to go through
+    // FpBackend::square, which some backends implement more cheaply than a
+    // general multiply.
+    fn square(self) -> Self {
+        self * self
+    }
+
+    fn inverse(self) -> Self;
+}
+
 pub struct Fp<B: FpBackend> {
     pub value: B::Repr,
     _marker: PhantomData<B>,
@@ -388,5 +411,15 @@ impl<B: FpBackend> Neg for Fp<B> {
 
     fn neg(self) -> Self::Output {
         Fp::new(B::neg(self.value))
+    }
+}
+
+impl<B: FpBackend> Field for Fp<B> {
+    fn square(self) -> Self {
+        Fp::square(self)
+    }
+
+    fn inverse(self) -> Self {
+        Fp::inverse(self)
     }
 }

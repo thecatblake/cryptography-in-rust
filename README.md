@@ -65,14 +65,14 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 ## Extension Fields
 
 * [x] `Fp2`
-* [ ] `Fp6`
+* [x] `Fp6`
 * [ ] `Fp12`
 * [ ] Frobenius endomorphism
 * [ ] Towering strategy and multiplication cost analysis
 
 ## Field Infrastructure
 
-* [ ] Generic `Field` / `PrimeField` trait design
+* [x] Generic `Field` / `PrimeField` trait design (`Field` trait + `QuadExt`/`CubicExt` generic extension towers; `Fp2`/`Fp6` are now derived instantiations)
 * [ ] FFT-friendly field (two-adicity, root-of-unity generation)
 * [ ] Multiplicative subgroup / coset construction
 
