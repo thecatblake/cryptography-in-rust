@@ -4,6 +4,9 @@ use std::ops::{Add, Div, Mul, Neg, Shr, ShrAssign, Sub};
 mod fp2;
 pub use fp2::{Fp2, Fp2Config};
 
+mod fp6;
+pub use fp6::{Fp6, Fp6Config};
+
 // The value should only satisfy this.
 pub trait FpRepr: Copy + PartialEq + ShrAssign<usize> {
     const ZERO: Self;
