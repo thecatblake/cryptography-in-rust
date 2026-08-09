@@ -2,10 +2,10 @@ use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Neg, Shr, ShrAssign, Sub};
 
 mod quad_ext;
-pub use quad_ext::{QuadExt, QuadExtConfig};
+pub use quad_ext::{QuadExt, QuadExtConfig, QuadExtFrobeniusConfig};
 
 mod cubic_ext;
-pub use cubic_ext::{CubicExt, CubicExtConfig};
+pub use cubic_ext::{CubicExt, CubicExtConfig, CubicExtFrobeniusConfig};
 
 mod fp2;
 pub use fp2::{Fp2, Fp2Config};

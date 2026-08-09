@@ -1,6 +1,6 @@
 use std::ops::{Add, Mul, Neg, Sub};
 
-use crate::Field;
+use crate::{Field, Frobenius};
 
 // CubicExtConfig describes a cubic extension Base[v] / (v^3 - XI) for some
 // base field Base. Fp6Config (Base = Fp2<C>, i.e. QuadExt<C>) is the only
@@ -13,6 +13,22 @@ pub trait CubicExtConfig: Sized {
     // v^3 - XI factors and the extension collapses into Base x Base x Base
     // instead of being a field.
     const XI: Self::Base;
+}
+
+// CubicExtFrobeniusConfig supplies the two extra pieces of data Frobenius
+// needs beyond CubicExtConfig: XI^((p-1)/3) and XI^(2(p-1)/3) in Base, so
+// that v^p and v^(2p) reduce to FROBENIUS_COEFF_C1*v and
+// FROBENIUS_COEFF_C2*v^2 respectively (see the Frobenius impl below).
+// Split out from CubicExtConfig itself for the same reason
+// QuadExtFrobeniusConfig is split from QuadExtConfig: computing these
+// coefficients needs the base field's actual characteristic, and in
+// practice compile-time exponentiation machinery, which not every
+// CubicExtConfig implementor should be forced to provide. Fp6Config is
+// this crate's only implementor (fp6.rs blanket-impls this trait for any
+// C: Fp6Config).
+pub trait CubicExtFrobeniusConfig: CubicExtConfig {
+    const FROBENIUS_COEFF_C1: Self::Base;
+    const FROBENIUS_COEFF_C2: Self::Base;
 }
 
 // CubicExt = Base[v] / (v^3 - XI), elements represented as c0 + c1*v + c2*v^2.
@@ -146,5 +162,27 @@ impl<C: CubicExtConfig> Mul for CubicExt<C> {
 impl<C: CubicExtConfig> Field for CubicExt<C> {
     fn inverse(self) -> Self {
         CubicExt::inverse(self)
+    }
+}
+
+// Frobenius on Base[v]/(v^3-XI): x^p for x = c0 + c1*v + c2*v^2 expands,
+// using that Frobenius is additive and multiplicative (char p), to
+// c0.frobenius() + c1.frobenius()*v^p + c2.frobenius()*v^(2p). v^p and
+// v^(2p) reduce to FROBENIUS_COEFF_C1*v and FROBENIUS_COEFF_C2*v^2 by
+// CubicExtFrobeniusConfig's definitions, so this is c0.frobenius() +
+// (FROBENIUS_COEFF_C1*c1.frobenius())*v + (FROBENIUS_COEFF_C2*
+// c2.frobenius())*v^2 -- two Base multiplies, no exponentiation at
+// runtime. Generic over any Base: Frobenius, same as QuadExt's Frobenius
+// impl.
+impl<C: CubicExtFrobeniusConfig> Frobenius for CubicExt<C>
+where
+    C::Base: Frobenius,
+{
+    fn frobenius(self) -> Self {
+        CubicExt::new(
+            self.c0.frobenius(),
+            C::FROBENIUS_COEFF_C1 * self.c1.frobenius(),
+            C::FROBENIUS_COEFF_C2 * self.c2.frobenius(),
+        )
     }
 }

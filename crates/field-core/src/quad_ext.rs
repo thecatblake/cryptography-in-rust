@@ -1,6 +1,6 @@
 use std::ops::{Add, Mul, Neg, Sub};
 
-use crate::Field;
+use crate::{Field, Frobenius};
 
 // QuadExtConfig describes a quadratic extension Base[u] / (u^2 - BETA) for
 // some base field Base. Fp2Config (Base = Fp<MontWideBackend<C>>) is the
@@ -14,6 +14,22 @@ pub trait QuadExtConfig: Sized {
     // Must be a quadratic non-residue in Base, or u^2 - BETA factors and
     // the extension collapses to Base x Base instead of being a field.
     const BETA: Self::Base;
+}
+
+// QuadExtFrobeniusConfig supplies the one extra piece of data Frobenius
+// needs beyond QuadExtConfig: BETA^((p-1)/2) in Base, so that u^p =
+// u*(u^2)^((p-1)/2) reduces to FROBENIUS_COEFF*u (see the Frobenius impl
+// below). Kept separate from QuadExtConfig itself, rather than folding
+// FROBENIUS_COEFF into it directly, so that computing this coefficient --
+// which needs the base field's actual characteristic, and in practice
+// Montgomery-form compile-time exponentiation -- isn't forced on every
+// QuadExtConfig implementor. Fp2Config is this crate's only implementor
+// (fp2.rs blanket-impls this trait for any C: Fp2Config); Fp12's
+// Fp12Marker doesn't implement it yet, so Fp12 doesn't implement Frobenius
+// yet either -- that's a matter of adding the impl, not changing this
+// trait or the Frobenius impl below.
+pub trait QuadExtFrobeniusConfig: QuadExtConfig {
+    const FROBENIUS_COEFF: Self::Base;
 }
 
 // QuadExt = Base[u] / (u^2 - BETA), elements represented as c0 + c1*u.
@@ -109,5 +125,23 @@ impl<C: QuadExtConfig> Mul for QuadExt<C> {
 impl<C: QuadExtConfig> Field for QuadExt<C> {
     fn inverse(self) -> Self {
         QuadExt::inverse(self)
+    }
+}
+
+// Frobenius on Base[u]/(u^2-BETA): x^p for x = c0 + c1*u expands, using
+// that Frobenius is additive and multiplicative (both hold in any
+// characteristic-p ring), to c0^p + c1^p*u^p = c0.frobenius() +
+// c1.frobenius()*u^p. u^p reduces to FROBENIUS_COEFF*u by
+// QuadExtFrobeniusConfig's definition, so this is c0.frobenius() +
+// (FROBENIUS_COEFF*c1.frobenius())*u -- one Base multiply, no
+// exponentiation at runtime. Generic over any Base: Frobenius (not just
+// Fp), so this also covers towers built on top of QuadExt, once their
+// QuadExtFrobeniusConfig is supplied.
+impl<C: QuadExtFrobeniusConfig> Frobenius for QuadExt<C>
+where
+    C::Base: Frobenius,
+{
+    fn frobenius(self) -> Self {
+        QuadExt::new(self.c0.frobenius(), C::FROBENIUS_COEFF * self.c1.frobenius())
     }
 }

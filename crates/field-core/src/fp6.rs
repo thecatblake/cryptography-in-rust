@@ -1,4 +1,4 @@
-use crate::{CubicExt, CubicExtConfig, Fp2, Fp2Config, Frobenius};
+use crate::{CubicExt, CubicExtConfig, CubicExtFrobeniusConfig, Fp2, Fp2Config};
 
 // Fp6Config extends Fp2Config with the one extra constant a cubic extension
 // needs: Fp6 = Fp2[v] / (v^3 - XI). Fp2Config already supplies everything
@@ -40,30 +40,21 @@ impl<C: Fp6Config> CubicExtConfig for C {
     const XI: Self::Base = <C as Fp6Config>::XI;
 }
 
+// Every Fp6Config is also a CubicExtFrobeniusConfig, forwarding
+// FROBENIUS_COEFF_C1/C2 the same way the CubicExtConfig impl above
+// forwards XI. This is what makes cubic_ext.rs's generic
+// `impl<C: CubicExtFrobeniusConfig> Frobenius for CubicExt<C>` apply to
+// Fp6<C> -- no bespoke Frobenius impl needed here.
+impl<C: Fp6Config> CubicExtFrobeniusConfig for C {
+    const FROBENIUS_COEFF_C1: Self::Base = <C as Fp6Config>::FROBENIUS_COEFF_C1;
+    const FROBENIUS_COEFF_C2: Self::Base = <C as Fp6Config>::FROBENIUS_COEFF_C2;
+}
+
 // Fp6 = Fp2[v] / (v^3 - XI), elements represented as c0 + c1*v + c2*v^2. A
 // specialization of CubicExt to an Fp2 base field, via Fp6Config's blanket
-// CubicExtConfig impl above -- Add/Sub/Neg/Mul/inverse all come from
-// CubicExt, not reimplemented here.
+// CubicExtConfig impl above -- Add/Sub/Neg/Mul/inverse/Frobenius all come
+// from CubicExt, not reimplemented here.
 pub type Fp6<C> = CubicExt<C>;
-
-// Frobenius on Fp6 = Fp2[v]/(v^3-XI): x^p for x = c0 + c1*v + c2*v^2
-// expands, using that Frobenius is additive and Fp2-semilinear over itself
-// (c0^p, c1^p, c2^p are each c_i.frobenius(), the Fp2 Frobenius from
-// fp2.rs), to c0^p + c1^p*v^p + c2^p*v^(2p). v^p and v^(2p) reduce to
-// FROBENIUS_COEFF_C1*v and FROBENIUS_COEFF_C2*v^2 respectively by
-// Fp6Config's definitions, so this is c0.frobenius() +
-// (FROBENIUS_COEFF_C1*c1.frobenius())*v +
-// (FROBENIUS_COEFF_C2*c2.frobenius())*v^2 -- two Fp2 multiplies, no
-// exponentiation at runtime.
-impl<C: Fp6Config> Frobenius for Fp6<C> {
-    fn frobenius(self) -> Self {
-        Fp6::new(
-            self.c0.frobenius(),
-            C::FROBENIUS_COEFF_C1 * self.c1.frobenius(),
-            C::FROBENIUS_COEFF_C2 * self.c2.frobenius(),
-        )
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -306,6 +297,7 @@ mod tests {
     // colliding with Mod17Mont's fe/canonical/etc. helpers above.
     mod frobenius {
         use super::*;
+        use crate::Frobenius;
 
         // p = 13 == 1 (mod 3), R = 2^32. R2/N_PRIME computed offline the
         // same way as Mod17Mont's (see field's Mod17Mont for the

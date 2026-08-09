@@ -1,4 +1,4 @@
-use crate::{Fp, Frobenius, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig};
+use crate::{Fp, MontFieldConfig, MontWideBackend, QuadExt, QuadExtConfig, QuadExtFrobeniusConfig};
 
 // Fp2Config extends MontFieldConfig with the one extra constant a quadratic
 // extension needs: Fp2 = Fp[u] / (u^2 - BETA). The MontFieldConfig
@@ -43,28 +43,25 @@ impl<C: Fp2Config> QuadExtConfig for C {
     const BETA: Self::Base = <C as Fp2Config>::BETA;
 }
 
+// Every Fp2Config is also a QuadExtFrobeniusConfig, forwarding
+// FROBENIUS_COEFF the same way the QuadExtConfig impl above forwards BETA.
+// This is what makes quad_ext.rs's generic
+// `impl<C: QuadExtFrobeniusConfig> Frobenius for QuadExt<C>` apply to
+// Fp2<C> -- no bespoke Frobenius impl needed here.
+impl<C: Fp2Config> QuadExtFrobeniusConfig for C {
+    const FROBENIUS_COEFF: Self::Base = <C as Fp2Config>::FROBENIUS_COEFF;
+}
+
 // Fp2 = Fp[u] / (u^2 - BETA), elements represented as c0 + c1*u. A
 // specialization of QuadExt to a Montgomery-backend base field, via
-// Fp2Config's blanket QuadExtConfig impl above -- Add/Sub/Neg/Mul/inverse
-// all come from QuadExt, not reimplemented here.
+// Fp2Config's blanket QuadExtConfig impl above -- Add/Sub/Neg/Mul/inverse/
+// Frobenius all come from QuadExt, not reimplemented here.
 pub type Fp2<C> = QuadExt<C>;
-
-// Frobenius on Fp2 = Fp[u]/(u^2-BETA): x^p for x = c0 + c1*u expands, using
-// that Frobenius is additive and fixes Fp itself (Fp's Frobenius impl is
-// the identity, by Fermat's little theorem), to c0^p + c1^p*u^p = c0 +
-// c1*u^p. u^p reduces to FROBENIUS_COEFF*u by Fp2Config::FROBENIUS_COEFF's
-// definition, so this is c0 + (FROBENIUS_COEFF*c1)*u -- one base-field
-// multiply, no exponentiation at runtime.
-impl<C: Fp2Config> Frobenius for Fp2<C> {
-    fn frobenius(self) -> Self {
-        Fp2::new(self.c0, C::FROBENIUS_COEFF * self.c1)
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{pow_mont_u32, to_mont_u32};
+    use crate::{Frobenius, pow_mont_u32, to_mont_u32};
     use proptest::prelude::*;
 
     // Same shape as field's Mod17Mont test fixture, just u32-native instead
