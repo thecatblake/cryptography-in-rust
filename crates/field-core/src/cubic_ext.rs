@@ -49,6 +49,15 @@ impl<C: CubicExtConfig> Clone for CubicExt<C> {
 
 impl<C: CubicExtConfig> Copy for CubicExt<C> {}
 
+impl<C: CubicExtConfig> PartialEq for CubicExt<C>
+where
+    C::Base: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.c0 == other.c0 && self.c1 == other.c1 && self.c2 == other.c2
+    }
+}
+
 impl<C: CubicExtConfig> CubicExt<C> {
     pub fn new(c0: C::Base, c1: C::Base, c2: C::Base) -> Self {
         CubicExt { c0, c1, c2 }

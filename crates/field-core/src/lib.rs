@@ -523,6 +523,17 @@ impl<B: FpBackend> Clone for Fp<B> {
 
 impl<B: FpBackend> Copy for Fp<B> {}
 
+// Both backends keep every value in a single canonical representation
+// (DefaultBackend: reduced mod p; MontBackend: Montgomery form, whose
+// to_mont/from_mont map is a bijection), so comparing the stored
+// representations directly is equivalent to comparing the field elements
+// they denote -- no reduction or from_mont round-trip needed first.
+impl<B: FpBackend> PartialEq for Fp<B> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
 impl<B: FpBackend> Fp<B> {
     pub const fn new(value: B::Repr) -> Self {
         Fp { value, _marker: PhantomData }

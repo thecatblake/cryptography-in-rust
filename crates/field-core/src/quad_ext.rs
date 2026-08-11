@@ -49,6 +49,15 @@ impl<C: QuadExtConfig> Clone for QuadExt<C> {
 
 impl<C: QuadExtConfig> Copy for QuadExt<C> {}
 
+impl<C: QuadExtConfig> PartialEq for QuadExt<C>
+where
+    C::Base: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.c0 == other.c0 && self.c1 == other.c1
+    }
+}
+
 impl<C: QuadExtConfig> QuadExt<C> {
     pub fn new(c0: C::Base, c1: C::Base) -> Self {
         QuadExt { c0, c1 }
