@@ -109,3 +109,83 @@ where
         Self { x: x3, y: y3, infinity: false }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bigint::U256;
+    use field::{DefaultBackend, Fp, FpConfig};
+
+    // Textbook toy curve y^2 = x^3 + 2x + 2 mod 17: order 19, generator
+    // G = (5,1). Worked example values below (2G, 3G) are the standard
+    // ones used to sanity-check short-Weierstrass addition by hand.
+    struct Mod17;
+    impl FpConfig for Mod17 {
+        const MODULUS: U256 = U256::from_u64(17);
+    }
+    type F17 = Fp<DefaultBackend<Mod17>>;
+
+    fn fe(v: u64) -> F17 {
+        F17::new(U256::from(v % 17))
+    }
+
+    struct Curve17;
+    impl Curve for Curve17 {
+        type Field = F17;
+        type Scalar = F17;
+
+        const A: F17 = F17::new(U256::from_u64(2));
+        const B: F17 = F17::new(U256::from_u64(2));
+    }
+    type P17 = AffinePoint<Curve17>;
+
+    fn pt(x: u64, y: u64) -> P17 {
+        P17 { x: fe(x), y: fe(y), infinity: false }
+    }
+
+    fn inf() -> P17 {
+        P17 { x: fe(0), y: fe(0), infinity: true }
+    }
+
+    fn g() -> P17 {
+        pt(5, 1)
+    }
+
+    #[test]
+    fn identity_is_additive_identity() {
+        assert!(g() + inf() == g());
+        assert!(inf() + g() == g());
+    }
+
+    #[test]
+    fn doubling_matches_worked_example() {
+        assert!(g() + g() == pt(6, 3));
+    }
+
+    #[test]
+    fn chord_addition_matches_worked_example() {
+        let g2 = g() + g();
+        assert!(g2 + g() == pt(10, 6));
+    }
+
+    #[test]
+    fn point_plus_its_negation_is_infinity() {
+        let neg_g = pt(5, 16); // -1 mod 17 == 16
+        assert!(g() + neg_g == inf());
+    }
+
+    #[test]
+    fn addition_is_commutative() {
+        let g3 = g() + g() + g();
+        assert!(g() + g3 == g3 + g());
+    }
+
+    #[test]
+    fn generator_has_order_19() {
+        let mut acc = inf();
+        for _ in 0..19 {
+            acc = acc + g();
+        }
+        assert!(acc == inf());
+    }
+}

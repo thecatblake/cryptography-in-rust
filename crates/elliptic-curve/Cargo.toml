@@ -6,3 +6,7 @@ license.workspace = true
 
 [dependencies]
 field-core = { path = "../field-core" }
+
+[dev-dependencies]
+bigint = { path = "../bigint" }
+field = { path = "../field" }
