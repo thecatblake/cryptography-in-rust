@@ -483,7 +483,27 @@ impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
 // their own Base: Field), which is what lets extensions stack on top of
 // each other -- e.g. a cubic extension of a quadratic one -- without
 // QuadExt/CubicExt needing to know anything Fp-specific about Base.
-pub trait Field: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Neg<Output = Self> {
+//
+// PartialEq is a supertrait, not an add-on bound callers reach for: a
+// field's elements have plain, total equality (no NaN-like case to carve
+// out, same reasoning FpRepr's own PartialEq supertrait above rests on),
+// and every implementor here (Fp<B>, QuadExt<C>, CubicExt<C>) already
+// provides it. Requiring it here means downstream generic code (e.g.
+// elliptic_curve::AffinePoint) gets equality for free instead of threading
+// a `where C::Field: PartialEq` bound through every impl that needs it.
+pub trait Field:
+    Copy + PartialEq + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Neg<Output = Self>
+{
+    // The additive and multiplicative identities. Not consts: Fp<B>'s ONE is
+    // FpBackend::one(), which for MontBackend is R mod MODULUS rather than a
+    // literal 1, and that conversion isn't available as a const fn over a
+    // generic B. Needed by callers that must produce a field element from
+    // nothing -- e.g. twisted_edwards::AffinePoint's identity (0,1) -- since
+    // unlike short_weierstrass's point-at-infinity flag, that identity is a
+    // genuine affine point with real coordinates.
+    fn zero() -> Self;
+    fn one() -> Self;
+
     // Defaults to self*self; Fp<B> overrides it to go through
     // FpBackend::square, which some backends implement more cheaply than a
     // general multiply.
@@ -522,6 +542,17 @@ impl<B: FpBackend> Clone for Fp<B> {
 }
 
 impl<B: FpBackend> Copy for Fp<B> {}
+
+// Both backends keep every value in a single canonical representation
+// (DefaultBackend: reduced mod p; MontBackend: Montgomery form, whose
+// to_mont/from_mont map is a bijection), so comparing the stored
+// representations directly is equivalent to comparing the field elements
+// they denote -- no reduction or from_mont round-trip needed first.
+impl<B: FpBackend> PartialEq for Fp<B> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
 
 impl<B: FpBackend> Fp<B> {
     pub const fn new(value: B::Repr) -> Self {
@@ -596,6 +627,14 @@ impl<B: FpBackend> Neg for Fp<B> {
 }
 
 impl<B: FpBackend> Field for Fp<B> {
+    fn zero() -> Self {
+        Fp::new(B::Repr::ZERO)
+    }
+
+    fn one() -> Self {
+        Fp::new(B::one())
+    }
+
     fn square(self) -> Self {
         Fp::square(self)
     }

@@ -82,13 +82,14 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Fundamentals
 
-* [ ] Curve Definition (short Weierstrass)
-* [ ] Point Representation (affine)
-* [ ] Identity Point
-* [ ] Point Addition
-* [ ] Point Doubling
-* [ ] Scalar Multiplication (double-and-add)
-* [ ] Point Validation (on-curve, subgroup check)
+* [x] Curve Definition (short Weierstrass)
+* [x] Point Representation (affine)
+* [x] Identity Point
+* [x] Point Addition
+* [x] Point Doubling
+* [x] Scalar Multiplication (double-and-add)
+* [x] Point Validation (on-curve)
+* [ ] Point Validation (subgroup check)
 * [ ] Serialization / Deserialization (compressed + uncompressed)
 
 ## Coordinate Systems
@@ -101,7 +102,8 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 ## Curve Forms
 
 * [ ] Montgomery form (Curve25519)
-* [ ] Twisted Edwards form (Ed25519)
+* [x] Twisted Edwards curve definition
+* [x] Twisted Edwards point arithmetic (unified addition + double-and-add scalar multiplication; Ed25519 itself not wired up yet)
 * [ ] In-circuit friendly curves (Baby Jubjub, Jubjub, Grumpkin)
 
 ## Advanced Scalar Multiplication

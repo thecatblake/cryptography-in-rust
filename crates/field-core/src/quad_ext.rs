@@ -49,6 +49,14 @@ impl<C: QuadExtConfig> Clone for QuadExt<C> {
 
 impl<C: QuadExtConfig> Copy for QuadExt<C> {}
 
+// No `where C::Base: PartialEq` needed: C::Base: Field, and Field now
+// carries PartialEq as a supertrait.
+impl<C: QuadExtConfig> PartialEq for QuadExt<C> {
+    fn eq(&self, other: &Self) -> bool {
+        self.c0 == other.c0 && self.c1 == other.c1
+    }
+}
+
 impl<C: QuadExtConfig> QuadExt<C> {
     pub fn new(c0: C::Base, c1: C::Base) -> Self {
         QuadExt { c0, c1 }
@@ -123,6 +131,14 @@ impl<C: QuadExtConfig> Mul for QuadExt<C> {
 // Lets QuadExt<C> itself serve as another extension's Base -- e.g.
 // CubicExtConfig::Base = QuadExt<C> for a cubic-over-quadratic tower.
 impl<C: QuadExtConfig> Field for QuadExt<C> {
+    fn zero() -> Self {
+        QuadExt::new(C::Base::zero(), C::Base::zero())
+    }
+
+    fn one() -> Self {
+        QuadExt::new(C::Base::one(), C::Base::zero())
+    }
+
     fn inverse(self) -> Self {
         QuadExt::inverse(self)
     }

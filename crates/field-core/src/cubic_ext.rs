@@ -49,6 +49,14 @@ impl<C: CubicExtConfig> Clone for CubicExt<C> {
 
 impl<C: CubicExtConfig> Copy for CubicExt<C> {}
 
+// No `where C::Base: PartialEq` needed: C::Base: Field, and Field now
+// carries PartialEq as a supertrait.
+impl<C: CubicExtConfig> PartialEq for CubicExt<C> {
+    fn eq(&self, other: &Self) -> bool {
+        self.c0 == other.c0 && self.c1 == other.c1 && self.c2 == other.c2
+    }
+}
+
 impl<C: CubicExtConfig> CubicExt<C> {
     pub fn new(c0: C::Base, c1: C::Base, c2: C::Base) -> Self {
         CubicExt { c0, c1, c2 }
@@ -160,6 +168,14 @@ impl<C: CubicExtConfig> Mul for CubicExt<C> {
 // Lets CubicExt<C> itself serve as another extension's Base -- e.g. a
 // further extension built on top of an Fp6-shaped tower.
 impl<C: CubicExtConfig> Field for CubicExt<C> {
+    fn zero() -> Self {
+        CubicExt::new(C::Base::zero(), C::Base::zero(), C::Base::zero())
+    }
+
+    fn one() -> Self {
+        CubicExt::new(C::Base::one(), C::Base::zero(), C::Base::zero())
+    }
+
     fn inverse(self) -> Self {
         CubicExt::inverse(self)
     }
