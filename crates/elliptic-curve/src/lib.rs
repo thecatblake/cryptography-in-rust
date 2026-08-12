@@ -7,7 +7,7 @@ use field_core::{Field, FpRepr};
 // (prime) order-n field used for scalar multiplication exponents -- kept
 // distinct from Field since the two are almost always different fields
 // (e.g. secp256k1's base field vs. its scalar field).
-pub trait Curve {
+pub trait ShortWeierstrassCurve {
     type Field: Field;
     type Scalar: Field;
 
@@ -15,11 +15,27 @@ pub trait Curve {
     const B: Self::Field;
 }
 
-// x, y generic over any Curve so the same point type works over Fp, Fp2,
-// or the small fields alike. infinity marks the point at infinity (the
-// group identity); x/y are meaningless when it's set, matching the usual
-// affine short-Weierstrass convention.
-pub struct AffinePoint<C: Curve> {
+// Twisted Edwards curve A*x^2 + y^2 = 1 + D*x^2*y^2 over Field, with Scalar
+// the order-n scalar field, same split as ShortWeierstrassCurve above.
+// Distinct trait rather than a shared "two curve constants" trait: the
+// constants mean different things (A/B are the Weierstrass cubic's
+// coefficients; A/D shape a totally different quartic-in-disguise curve
+// with its own addition law and identity point at (0,1) rather than at
+// infinity), and AffinePoint's chord-and-tangent arithmetic below is
+// specific to the Weierstrass equation, so this doesn't plug into it.
+pub trait TwistedEdwardsCurve {
+    type Field: Field;
+    type Scalar: Field;
+
+    const A: Self::Field;
+    const D: Self::Field;
+}
+
+// x, y generic over any ShortWeierstrassCurve so the same point type works
+// over Fp, Fp2, or the small fields alike. infinity marks the point at
+// infinity (the group identity); x/y are meaningless when it's set,
+// matching the usual affine short-Weierstrass convention.
+pub struct AffinePoint<C: ShortWeierstrassCurve> {
     pub x: C::Field,
     pub y: C::Field,
     pub infinity: bool,
@@ -28,15 +44,15 @@ pub struct AffinePoint<C: Curve> {
 // Derived impls would require C: Clone/Copy, but only C::Field needs to be
 // (Field's Copy supertrait already guarantees that), so implement by hand --
 // same reasoning as Fp<B>'s manual Clone/Copy in field-core.
-impl<C: Curve> Clone for AffinePoint<C> {
+impl<C: ShortWeierstrassCurve> Clone for AffinePoint<C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<C: Curve> Copy for AffinePoint<C> {}
+impl<C: ShortWeierstrassCurve> Copy for AffinePoint<C> {}
 
-impl<C: Curve> fmt::Debug for AffinePoint<C>
+impl<C: ShortWeierstrassCurve> fmt::Debug for AffinePoint<C>
 where
     C::Field: fmt::Debug,
 {
@@ -51,7 +67,7 @@ where
 
 // No `where C::Field: PartialEq` needed: Field carries PartialEq as a
 // supertrait, so C::Field: Field already guarantees it.
-impl<C: Curve> PartialEq for AffinePoint<C> {
+impl<C: ShortWeierstrassCurve> PartialEq for AffinePoint<C> {
     fn eq(&self, other: &Self) -> bool {
         match (self.infinity, other.infinity) {
             (true, true) => true,
@@ -66,7 +82,7 @@ impl<C: Curve> PartialEq for AffinePoint<C> {
 // from the vertical-line case (self == -other) when x1 == x2 -- both only
 // differ by their y coordinate, so there's no way to route between the two
 // formulas without comparing field elements.
-impl<C: Curve> Add for AffinePoint<C> {
+impl<C: ShortWeierstrassCurve> Add for AffinePoint<C> {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
@@ -106,7 +122,7 @@ impl<C: Curve> Add for AffinePoint<C> {
     }
 }
 
-impl<C: Curve> AffinePoint<C> {
+impl<C: ShortWeierstrassCurve> AffinePoint<C> {
     // Checks the defining equation y^2 = x^3 + A*x + B. The point at
     // infinity is the group's identity, not an affine solution to the
     // equation, so it's exempted and always validates.
@@ -132,7 +148,7 @@ impl<C: Curve> AffinePoint<C> {
 // bigint::U256) rather than C::Scalar itself: Field doesn't expose bit
 // access on its elements (same reason Fp::pow's exponent is B::Repr, not
 // Self), so there's no way to walk a C::Scalar's bits directly.
-impl<C: Curve, R: FpRepr> Mul<R> for AffinePoint<C> {
+impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
     fn mul(self, scalar: R) -> Self::Output {
@@ -174,7 +190,7 @@ mod tests {
     }
 
     struct Curve17;
-    impl Curve for Curve17 {
+    impl ShortWeierstrassCurve for Curve17 {
         type Field = F17;
         type Scalar = F17;
 
