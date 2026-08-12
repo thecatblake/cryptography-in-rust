@@ -106,6 +106,22 @@ impl<C: Curve> Add for AffinePoint<C> {
     }
 }
 
+impl<C: Curve> AffinePoint<C> {
+    // Checks the defining equation y^2 = x^3 + A*x + B. The point at
+    // infinity is the group's identity, not an affine solution to the
+    // equation, so it's exempted and always validates.
+    pub fn validate(&self) -> bool {
+        if self.infinity {
+            return true;
+        }
+
+        let lhs = self.y.square();
+        let rhs = self.x.square() * self.x + C::A * self.x + C::B;
+
+        lhs == rhs
+    }
+}
+
 // Scalar multiplication by double-and-add: the additive-group analogue of
 // Fp::pow's square-and-multiply (field-core/src/lib.rs) -- "double" takes
 // the place of "square" and point "add" takes the place of field "mul",
@@ -264,5 +280,40 @@ mod tests {
     #[test]
     fn scalar_mul_of_infinity_is_infinity() {
         assert!(inf() * 7u64 == inf());
+    }
+
+    #[test]
+    fn validate_accepts_points_on_the_curve() {
+        // G, 2G, 3G from the worked example, plus its negation -- all
+        // genuine solutions to y^2 = x^3 + 2x + 2 mod 17.
+        assert!(g().validate());
+        assert!(pt(6, 3).validate());
+        assert!(pt(10, 6).validate());
+        assert!(pt(5, 16).validate());
+    }
+
+    #[test]
+    fn validate_rejects_points_off_the_curve() {
+        // Same x as G but the wrong y: 5^3 + 2*5 + 2 = 1 mod 17, whose
+        // square roots are 1 and 16, not 2.
+        assert!(!pt(5, 2).validate());
+        // x^3+2x+2 mod 17 at x=0 is 2 (whose square roots are 6 and 11,
+        // not 0), so (0,0) isn't on the curve either.
+        assert!(!pt(0, 0).validate());
+    }
+
+    #[test]
+    fn validate_accepts_infinity() {
+        assert!(inf().validate());
+    }
+
+    #[test]
+    fn validate_accepts_every_point_produced_by_add_and_scalar_mul() {
+        let mut acc = inf();
+        for k in 0..25u64 {
+            assert!(acc.validate(), "k={k}");
+            assert!((g() * k).validate(), "k={k}");
+            acc = acc + g();
+        }
     }
 }
