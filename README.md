@@ -102,7 +102,8 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 ## Curve Forms
 
 * [ ] Montgomery form (Curve25519)
-* [ ] Twisted Edwards form (Ed25519)
+* [x] Twisted Edwards curve definition
+* [ ] Twisted Edwards point arithmetic (Ed25519)
 * [ ] In-circuit friendly curves (Baby Jubjub, Jubjub, Grumpkin)
 
 ## Advanced Scalar Multiplication
