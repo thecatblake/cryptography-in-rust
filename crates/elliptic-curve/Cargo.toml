@@ -10,3 +10,8 @@ field-core = { path = "../field-core" }
 [dev-dependencies]
 bigint = { path = "../bigint" }
 field = { path = "../field" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "elliptic_curve_ops"
+harness = false

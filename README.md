@@ -101,7 +101,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Curve Forms
 
-* [ ] Montgomery form (Curve25519)
+* [x] Montgomery form (curve definition + unified chord-and-tangent addition and double-and-add scalar multiplication; Curve25519 itself not wired up yet)
 * [x] Twisted Edwards curve definition
 * [x] Twisted Edwards point arithmetic (unified addition + double-and-add scalar multiplication; Ed25519 itself not wired up yet)
 * [ ] In-circuit friendly curves (Baby Jubjub, Jubjub, Grumpkin)
@@ -590,6 +590,18 @@ Run via `cargo bench --workspace`. Median timings from `criterion`; `Fp<U256>` u
 | inverse | 320 ns | 491 ns | 388 ns | 6.37 µs |
 
 `mul`/`square`/`inverse` grow roughly 3x per tower level (Fp2 → Fp6 → Fp12) on the small fields, tracking the Karatsuba mul cost (3 base muls at Fp2, 6 at Fp6, 3 Fp6-muls at Fp12) plus the extra field inversion each `inverse` call chains through. `Fp<U256>`'s multi-limb `mul` dominates every tower level, same as it does for the base field above.
+
+### Elliptic Curve Benchmark Results
+
+Run via `cargo bench -p elliptic-curve` (`elliptic_curve_ops.rs`). Median timings from `criterion`; all three curve forms run over the same `Fp<U256>` `DefaultBackend` field (secp256k1's base prime, reused only for a realistic 256-bit modulus — the curve constants and points are arbitrary, not secp256k1's own, since point `add`/`Mul` never call `validate()`); `scalar_mul` uses a full-width 256-bit scalar. Same local-machine caveat as above.
+
+| op | Short Weierstrass | Twisted Edwards | Montgomery |
+|---|---|---|---|
+| add | 2.28 µs | 6.94 µs | 2.36 µs |
+| double | 3.73 µs | — | 3.85 µs |
+| scalar_mul | 2.36 ms | 4.48 ms | 2.38 ms |
+
+Twisted Edwards has no separate `double`: its addition law is unified (see `twisted_edwards.rs`), so doubling reuses the `add` code path rather than a cheaper tangent-line formula — that's also why its `add` costs roughly 2 inversions' (via 2 divisions) worth more than short Weierstrass/Montgomery's chord-and-tangent `add`, which only needs 1. `scalar_mul` (double-and-add over a 256-bit scalar) tracks each form's `add`/`double` cost roughly linearly, since it's ~256 doublings plus up to 256 adds.
 
 ---
 

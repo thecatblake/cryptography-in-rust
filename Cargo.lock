@@ -215,6 +215,7 @@ name = "elliptic-curve"
 version = "0.1.0"
 dependencies = [
  "bigint",
+ "criterion",
  "field",
  "field-core",
 ]
