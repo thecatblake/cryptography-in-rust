@@ -49,10 +49,9 @@ where
     }
 }
 
-impl<C: Curve> PartialEq for AffinePoint<C>
-where
-    C::Field: PartialEq,
-{
+// No `where C::Field: PartialEq` needed: Field carries PartialEq as a
+// supertrait, so C::Field: Field already guarantees it.
+impl<C: Curve> PartialEq for AffinePoint<C> {
     fn eq(&self, other: &Self) -> bool {
         match (self.infinity, other.infinity) {
             (true, true) => true,
@@ -62,15 +61,12 @@ where
     }
 }
 
-// Standard short-Weierstrass chord-and-tangent addition. Requires
-// C::Field: PartialEq to tell the doubling case (self == other) apart from
-// the vertical-line case (self == -other) when x1 == x2 -- both only
+// Standard short-Weierstrass chord-and-tangent addition. Leans on Field's
+// PartialEq supertrait to tell the doubling case (self == other) apart
+// from the vertical-line case (self == -other) when x1 == x2 -- both only
 // differ by their y coordinate, so there's no way to route between the two
 // formulas without comparing field elements.
-impl<C: Curve> Add for AffinePoint<C>
-where
-    C::Field: PartialEq,
-{
+impl<C: Curve> Add for AffinePoint<C> {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
@@ -120,10 +116,7 @@ where
 // bigint::U256) rather than C::Scalar itself: Field doesn't expose bit
 // access on its elements (same reason Fp::pow's exponent is B::Repr, not
 // Self), so there's no way to walk a C::Scalar's bits directly.
-impl<C: Curve, R: FpRepr> Mul<R> for AffinePoint<C>
-where
-    C::Field: PartialEq,
-{
+impl<C: Curve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
     fn mul(self, scalar: R) -> Self::Output {

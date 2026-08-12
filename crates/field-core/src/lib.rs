@@ -483,7 +483,17 @@ impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
 // their own Base: Field), which is what lets extensions stack on top of
 // each other -- e.g. a cubic extension of a quadratic one -- without
 // QuadExt/CubicExt needing to know anything Fp-specific about Base.
-pub trait Field: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Neg<Output = Self> {
+//
+// PartialEq is a supertrait, not an add-on bound callers reach for: a
+// field's elements have plain, total equality (no NaN-like case to carve
+// out, same reasoning FpRepr's own PartialEq supertrait above rests on),
+// and every implementor here (Fp<B>, QuadExt<C>, CubicExt<C>) already
+// provides it. Requiring it here means downstream generic code (e.g.
+// elliptic_curve::AffinePoint) gets equality for free instead of threading
+// a `where C::Field: PartialEq` bound through every impl that needs it.
+pub trait Field:
+    Copy + PartialEq + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Neg<Output = Self>
+{
     // Defaults to self*self; Fp<B> overrides it to go through
     // FpBackend::square, which some backends implement more cheaply than a
     // general multiply.

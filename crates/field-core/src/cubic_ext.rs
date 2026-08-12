@@ -49,10 +49,9 @@ impl<C: CubicExtConfig> Clone for CubicExt<C> {
 
 impl<C: CubicExtConfig> Copy for CubicExt<C> {}
 
-impl<C: CubicExtConfig> PartialEq for CubicExt<C>
-where
-    C::Base: PartialEq,
-{
+// No `where C::Base: PartialEq` needed: C::Base: Field, and Field now
+// carries PartialEq as a supertrait.
+impl<C: CubicExtConfig> PartialEq for CubicExt<C> {
     fn eq(&self, other: &Self) -> bool {
         self.c0 == other.c0 && self.c1 == other.c1 && self.c2 == other.c2
     }

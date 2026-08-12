@@ -49,10 +49,9 @@ impl<C: QuadExtConfig> Clone for QuadExt<C> {
 
 impl<C: QuadExtConfig> Copy for QuadExt<C> {}
 
-impl<C: QuadExtConfig> PartialEq for QuadExt<C>
-where
-    C::Base: PartialEq,
-{
+// No `where C::Base: PartialEq` needed: C::Base: Field, and Field now
+// carries PartialEq as a supertrait.
+impl<C: QuadExtConfig> PartialEq for QuadExt<C> {
     fn eq(&self, other: &Self) -> bool {
         self.c0 == other.c0 && self.c1 == other.c1
     }
