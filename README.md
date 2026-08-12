@@ -593,15 +593,15 @@ Run via `cargo bench --workspace`. Median timings from `criterion`; `Fp<U256>` u
 
 ### Elliptic Curve Benchmark Results
 
-Run via `cargo bench -p elliptic-curve` (`elliptic_curve_ops.rs`). Median timings from `criterion`; all three curve forms run over the same `Fp<U256>` `DefaultBackend` field (secp256k1's base prime, reused only for a realistic 256-bit modulus — the curve constants and points are arbitrary, not secp256k1's own, since point `add`/`Mul` never call `validate()`); `scalar_mul` uses a full-width 256-bit scalar. Same local-machine caveat as above.
+Run via `cargo bench -p elliptic-curve` (`elliptic_curve_ops.rs`). Median timings from `criterion`; all three curve forms run over the same `Fp<U256>` `MontBackend` field (secp256k1's base prime, reused only for a realistic 256-bit modulus — the curve constants and points are arbitrary, not secp256k1's own, since point `add`/`Mul` never call `validate()`), the backend real curve code would actually use for its cheaper `mul` (see the `Fp<U256>` rows in the field benchmark table above); `scalar_mul` uses a full-width 256-bit scalar. Same local-machine caveat as above.
 
 | op | Short Weierstrass | Twisted Edwards | Montgomery |
 |---|---|---|---|
-| add | 2.28 µs | 6.94 µs | 2.36 µs |
-| double | 3.73 µs | — | 3.85 µs |
-| scalar_mul | 2.36 ms | 4.48 ms | 2.38 ms |
+| add | 707 ns | 3.04 µs | 738 ns |
+| double | 1.49 µs | — | 1.56 µs |
+| scalar_mul | 821 µs | 1.79 ms | 858 µs |
 
-Twisted Edwards has no separate `double`: its addition law is unified (see `twisted_edwards.rs`), so doubling reuses the `add` code path rather than a cheaper tangent-line formula — that's also why its `add` costs roughly 2 inversions' (via 2 divisions) worth more than short Weierstrass/Montgomery's chord-and-tangent `add`, which only needs 1. `scalar_mul` (double-and-add over a 256-bit scalar) tracks each form's `add`/`double` cost roughly linearly, since it's ~256 doublings plus up to 256 adds.
+Twisted Edwards has no separate `double`: its addition law is unified (see `twisted_edwards.rs`), so doubling reuses the `add` code path rather than a cheaper tangent-line formula — that's also why its `add` costs roughly 2 inversions' (via 2 divisions) worth more than short Weierstrass/Montgomery's chord-and-tangent `add`, which only needs 1. `scalar_mul` (double-and-add over a 256-bit scalar) tracks each form's `add`/`double` cost roughly linearly, since it's ~256 doublings plus up to 256 adds. Switching the field backend from `DefaultBackend` to `MontBackend` (measured directly: `add` 2.28 µs → 707 ns, `double` 3.73 µs → 1.49 µs, `scalar_mul` 2.36 ms → 821 µs on Short Weierstrass) cuts every curve op by roughly 2.5–3x, in line with `MontBackend`'s cheaper `mul` in the base-field table above dominating the handful of field multiplications each curve op chains through.
 
 ---
 

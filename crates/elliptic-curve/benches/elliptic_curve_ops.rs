@@ -4,24 +4,42 @@ use elliptic_curve::{
     AffinePoint as SwAffinePoint, EdwardsAffinePoint, MontgomeryAffinePoint, MontgomeryCurve,
     ShortWeierstrassCurve, TwistedEdwardsCurve,
 };
-use field::{DefaultBackend, Fp, FpConfig};
+use field::{Fp, FpMontConfig, MontBackend};
 
-// Same 256-bit modulus as field/benches/field_ops.rs (secp256k1 base field
-// prime), reused here purely to get a realistic-sized field for timing --
-// the curve constants and point coordinates below are arbitrary, not
-// secp256k1's own parameters, since Add/Mul never call validate() and so
-// don't need a genuine on-curve point to benchmark the arithmetic.
-struct P;
-impl FpConfig for P {
+// Same secp256k1-base-field modulus (and precomputed R2/N_PRIME) as
+// field/benches/field_ops.rs's Secp256k1PMont, reused here to get a
+// realistic-sized field on the backend real curves actually use --
+// MontBackend, not DefaultBackend, since production elliptic-curve code
+// runs field arithmetic in Montgomery form for the ~30x cheaper `mul` (see
+// the Fp<U256> DefaultBackend vs. MontBackend row in the field benchmark
+// table above).
+struct PMont;
+impl FpMontConfig for PMont {
     const MODULUS: U256 = U256::from_limbs([
         0xffff_fffe_ffff_fc2f,
         0xffff_ffff_ffff_ffff,
         0xffff_ffff_ffff_ffff,
         0xffff_ffff_ffff_ffff,
     ]);
+    const R2: U256 = U256::from_limbs([0x0000_07a2_000e_90a1, 1, 0, 0]);
+    const N_PRIME: U256 = U256::from_limbs([
+        0xd838_091d_d225_3531,
+        0xbcb2_23fe_dc24_a059,
+        0x9c46_c2c2_95f2_b761,
+        0xc9bd_1905_1553_8399,
+    ]);
 }
-type F = Fp<DefaultBackend<P>>;
+type F = Fp<MontBackend<PMont>>;
 
+// Curve constants and point coordinates below are arbitrary, not
+// secp256k1's own parameters -- Add/Mul never call validate(), so no
+// genuine on-curve point is needed to benchmark the arithmetic. The raw
+// limbs aren't converted to Montgomery form first (via to_mont/R2): under
+// MontBackend, Fp's add/sub/mul are self-consistent over any Repr value
+// regardless of which domain it nominally encodes, so an unconverted
+// literal still exercises the same field operations as a "real" Montgomery
+// value -- it just represents a different (still arbitrary) underlying
+// integer.
 const fn fe(limbs: [u64; 4]) -> F {
     F::new(U256::from_limbs(limbs))
 }
