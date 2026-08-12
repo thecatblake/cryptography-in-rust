@@ -168,6 +168,14 @@ impl<C: CubicExtConfig> Mul for CubicExt<C> {
 // Lets CubicExt<C> itself serve as another extension's Base -- e.g. a
 // further extension built on top of an Fp6-shaped tower.
 impl<C: CubicExtConfig> Field for CubicExt<C> {
+    fn zero() -> Self {
+        CubicExt::new(C::Base::zero(), C::Base::zero(), C::Base::zero())
+    }
+
+    fn one() -> Self {
+        CubicExt::new(C::Base::one(), C::Base::zero(), C::Base::zero())
+    }
+
     fn inverse(self) -> Self {
         CubicExt::inverse(self)
     }

@@ -131,6 +131,14 @@ impl<C: QuadExtConfig> Mul for QuadExt<C> {
 // Lets QuadExt<C> itself serve as another extension's Base -- e.g.
 // CubicExtConfig::Base = QuadExt<C> for a cubic-over-quadratic tower.
 impl<C: QuadExtConfig> Field for QuadExt<C> {
+    fn zero() -> Self {
+        QuadExt::new(C::Base::zero(), C::Base::zero())
+    }
+
+    fn one() -> Self {
+        QuadExt::new(C::Base::one(), C::Base::zero())
+    }
+
     fn inverse(self) -> Self {
         QuadExt::inverse(self)
     }

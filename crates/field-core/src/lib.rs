@@ -494,6 +494,16 @@ impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
 pub trait Field:
     Copy + PartialEq + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Neg<Output = Self>
 {
+    // The additive and multiplicative identities. Not consts: Fp<B>'s ONE is
+    // FpBackend::one(), which for MontBackend is R mod MODULUS rather than a
+    // literal 1, and that conversion isn't available as a const fn over a
+    // generic B. Needed by callers that must produce a field element from
+    // nothing -- e.g. twisted_edwards::AffinePoint's identity (0,1) -- since
+    // unlike short_weierstrass's point-at-infinity flag, that identity is a
+    // genuine affine point with real coordinates.
+    fn zero() -> Self;
+    fn one() -> Self;
+
     // Defaults to self*self; Fp<B> overrides it to go through
     // FpBackend::square, which some backends implement more cheaply than a
     // general multiply.
@@ -617,6 +627,14 @@ impl<B: FpBackend> Neg for Fp<B> {
 }
 
 impl<B: FpBackend> Field for Fp<B> {
+    fn zero() -> Self {
+        Fp::new(B::Repr::ZERO)
+    }
+
+    fn one() -> Self {
+        Fp::new(B::one())
+    }
+
     fn square(self) -> Self {
         Fp::square(self)
     }
