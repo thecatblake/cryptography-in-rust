@@ -1,7 +1,7 @@
 use std::fmt;
-use std::ops::Add;
+use std::ops::{Add, Mul};
 
-use field_core::Field;
+use field_core::{Field, FpRepr};
 
 // Short Weierstrass curve y^2 = x^3 + A*x + B over Field, with Scalar the
 // (prime) order-n field used for scalar multiplication exponents -- kept
@@ -110,6 +110,41 @@ where
     }
 }
 
+// Scalar multiplication by double-and-add: the additive-group analogue of
+// Fp::pow's square-and-multiply (field-core/src/lib.rs) -- "double" takes
+// the place of "square" and point "add" takes the place of field "mul",
+// walking the scalar's bits from least to most significant. O(log scalar)
+// point additions instead of O(scalar).
+//
+// The scalar is any R: FpRepr (a bit-indexable integer, e.g. u64 or
+// bigint::U256) rather than C::Scalar itself: Field doesn't expose bit
+// access on its elements (same reason Fp::pow's exponent is B::Repr, not
+// Self), so there's no way to walk a C::Scalar's bits directly.
+impl<C: Curve, R: FpRepr> Mul<R> for AffinePoint<C>
+where
+    C::Field: PartialEq,
+{
+    type Output = Self;
+
+    fn mul(self, scalar: R) -> Self::Output {
+        // Identity element O; x/y are meaningless once infinity is set,
+        // so any values do -- reuse self's, same convention as Add.
+        let mut result = Self { x: self.x, y: self.y, infinity: true };
+        let mut base = self;
+        let mut e = scalar;
+
+        while e != R::ZERO {
+            if e.bit(0) {
+                result = result + base;
+            }
+            base = base + base;
+            e >>= 1;
+        }
+
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +222,54 @@ mod tests {
             acc = acc + g();
         }
         assert!(acc == inf());
+    }
+
+    #[test]
+    fn scalar_mul_by_zero_is_infinity() {
+        assert!(g() * 0u64 == inf());
+    }
+
+    #[test]
+    fn scalar_mul_by_one_is_self() {
+        assert!(g() * 1u64 == g());
+    }
+
+    #[test]
+    fn scalar_mul_matches_worked_examples() {
+        assert!(g() * 2u64 == pt(6, 3));
+        assert!(g() * 3u64 == pt(10, 6));
+    }
+
+    #[test]
+    fn scalar_mul_matches_repeated_addition() {
+        let mut acc = inf();
+        for k in 0..25u64 {
+            assert!(g() * k == acc, "mismatch at k={k}");
+            acc = acc + g();
+        }
+    }
+
+    #[test]
+    fn scalar_mul_by_order_is_infinity() {
+        assert!(g() * 19u64 == inf());
+    }
+
+    #[test]
+    fn scalar_mul_wraps_modulo_order() {
+        // 19 is the group order, so k and k+19 must land on the same point.
+        assert!(g() * 5u64 == g() * 24u64);
+    }
+
+    #[test]
+    fn scalar_mul_accepts_any_fprepr_not_just_u64() {
+        // Same double-and-add path, driven by a bigint scalar instead of a
+        // machine int -- confirms genericity over R: FpRepr (matters for
+        // real curves, whose scalar field doesn't fit in a u64).
+        assert!(g() * U256::from_u64(3) == pt(10, 6));
+    }
+
+    #[test]
+    fn scalar_mul_of_infinity_is_infinity() {
+        assert!(inf() * 7u64 == inf());
     }
 }
