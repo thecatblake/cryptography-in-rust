@@ -2,7 +2,7 @@ use std::ops::{Index, Add, Sub, Mul, Div, Rem, AddAssign, SubAssign, Shl, ShlAss
 
 use std::cmp::Ordering;
 
-use field_core::FpRepr;
+use field_core::{EuclideanRepr, FpRepr};
 
 pub mod math;
 
@@ -107,6 +107,30 @@ impl<const N: usize> FpRepr for Uint<N> {
 
     fn bit(&self, i: usize) -> bool {
         Uint::bit(self, i)
+    }
+}
+
+// Sub/wrapping_mul both wrap mod 2^(64*N) (two's-complement semantics),
+// so is_negative's top-bit check is the same trick used to recover a
+// canonical positive residue from a "negative" intermediate Bezout
+// coefficient in field_core::gcd_inverse.
+impl<const N: usize> EuclideanRepr for Uint<N> {
+    const ONE: Self = Self::ONE;
+
+    fn wrapping_sub(self, rhs: Self) -> Self {
+        self - rhs
+    }
+
+    fn wrapping_mul(self, rhs: Self) -> Self {
+        Uint::wrapping_mul(self, rhs)
+    }
+
+    fn div_rem(self, rhs: Self) -> (Self, Self) {
+        Uint::div_rem(self, rhs)
+    }
+
+    fn is_negative(self) -> bool {
+        self.bit(N * 64 - 1)
     }
 }
 
@@ -368,6 +392,29 @@ impl<const N: usize> Uint<N> {
         }
 
         (quotient, dividend)
+    }
+
+    // Schoolbook multiply, truncated to N limbs (i.e. mod 2^(64*N)) instead
+    // of widening -- used by EuclideanRepr's extended-GCD Bezout
+    // coefficients, which are only ever consumed mod 2^(64*N) and are
+    // allowed to wrap the same way Add/Sub above do.
+    pub fn wrapping_mul(self, rhs: Self) -> Self {
+        let mut result = [0u64; N];
+
+        for i in 0..N {
+            if self[i] == 0 {
+                continue;
+            }
+
+            let mut carry = 0u128;
+            for j in 0..(N - i) {
+                let sum = self[i] as u128 * rhs[j] as u128 + result[i + j] as u128 + carry;
+                result[i + j] = sum as u64;
+                carry = sum >> 64;
+            }
+        }
+
+        Uint { limbs: result }
     }
 }
 

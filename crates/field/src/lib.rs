@@ -1,5 +1,4 @@
 use bigint::{U256, U512, Uint};
-use bigint::math::mod_inv;
 use std::marker::PhantomData;
 
 pub use field_core::{Fp, FpBackend};
@@ -69,11 +68,8 @@ impl<T: FpConfig> FpBackend for DefaultBackend<T> {
         }
     }
 
-    fn inverse(a: U256) -> U256 {
-        assert!(a != U256::ZERO, "cannot invert zero in a field");
-
-        mod_inv(a, Self::MODULUS)
-    }
+    // No override: U256 implements EuclideanRepr (see bigint/src/lib.rs), so
+    // FpBackend's default extended-GCD `inverse` applies directly here.
 
     fn one() -> U256 {
         U256::ONE
@@ -156,13 +152,15 @@ impl<T: FpMontConfig> FpBackend for MontBackend<T> {
         }
     }
 
+    // Can't inherit the plain default: gcd_inverse on the raw Montgomery
+    // repr would compute (v*R)^-1 = v^-1*R^-1, not the Montgomery repr of
+    // v^-1 (v^-1*R). Unwrap to plain form, invert via the same shared
+    // gcd_inverse core, then rewrap.
     fn inverse(a: U256) -> U256 {
         assert!(a != U256::ZERO, "cannot invert zero in a field");
 
         let plain = Self::from_mont(a);
-        let inv = mod_inv(plain, Self::MODULUS);
-
-        Self::to_mont(inv)
+        Self::to_mont(field_core::gcd_inverse(plain, Self::MODULUS))
     }
 
     fn one() -> U256 {

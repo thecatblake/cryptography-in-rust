@@ -41,8 +41,88 @@ impl_fp_repr!(u32);
 impl_fp_repr!(u64);
 impl_fp_repr!(u128);
 
+// Repr types that support extended-GCD-based modular inversion. Sub/mul
+// wrap on overflow (two's-complement semantics), matching bigint::Uint<N>'s
+// Add/Sub impls -- the extended Euclidean algorithm's Bezout coefficient
+// goes "negative" mid-algorithm and relies on that wraparound, recovered
+// via is_negative's top-bit check (see gcd_inverse below).
+pub trait EuclideanRepr: FpRepr {
+    const ONE: Self;
+
+    fn wrapping_sub(self, rhs: Self) -> Self;
+    fn wrapping_mul(self, rhs: Self) -> Self;
+    fn div_rem(self, rhs: Self) -> (Self, Self);
+    fn is_negative(self) -> bool;
+}
+
+macro_rules! impl_euclidean_repr {
+    ($repr:ty) => {
+        impl EuclideanRepr for $repr {
+            const ONE: Self = 1;
+
+            fn wrapping_sub(self, rhs: Self) -> Self {
+                <$repr>::wrapping_sub(self, rhs)
+            }
+
+            fn wrapping_mul(self, rhs: Self) -> Self {
+                <$repr>::wrapping_mul(self, rhs)
+            }
+
+            fn div_rem(self, rhs: Self) -> (Self, Self) {
+                (self / rhs, self % rhs)
+            }
+
+            fn is_negative(self) -> bool {
+                self.bit(<$repr>::BITS as usize - 1)
+            }
+        }
+    };
+}
+
+impl_euclidean_repr!(u8);
+impl_euclidean_repr!(u16);
+impl_euclidean_repr!(u32);
+impl_euclidean_repr!(u64);
+impl_euclidean_repr!(u128);
+
+// Extended-Euclidean-algorithm modular inverse: computes a^-1 mod modulus.
+// Only tracks the Bezout coefficient for `a`, not `modulus`'s -- that's all
+// a modular inverse needs, unlike a full extended-gcd. Sub/mul wrap
+// (two's-complement semantics), so the coefficient is free to go
+// "negative" mid-algorithm; is_negative's top-bit check plus a final
+// negate-and-subtract-from-modulus recovers the canonical positive residue.
+pub fn gcd_inverse<R: EuclideanRepr>(a: R, modulus: R) -> R {
+    let mut old_r = a;
+    let mut r = modulus;
+    let mut old_s = R::ONE;
+    let mut s = R::ZERO;
+
+    while r != R::ZERO {
+        let (q, rem) = old_r.div_rem(r);
+
+        old_r = r;
+        r = rem;
+
+        let new_s = old_s.wrapping_sub(q.wrapping_mul(s));
+        old_s = s;
+        s = new_s;
+    }
+
+    if old_s.is_negative() {
+        modulus.wrapping_sub(R::ZERO.wrapping_sub(old_s))
+    } else {
+        old_s
+    }
+}
+
 pub trait FpBackend {
-    type Repr: FpRepr;
+    // EuclideanRepr (not just FpRepr) so every backend's Repr can drive the
+    // default `inverse` below -- see gcd_inverse's doc comment for why
+    // that's the default. A hypothetical Repr that couldn't support it
+    // would still need to override inverse, but would also need its own
+    // div_rem/wrapping_sub/wrapping_mul to satisfy this bound in the first
+    // place, so in practice every integer-like Repr qualifies for free.
+    type Repr: FpRepr + EuclideanRepr;
 
     const MODULUS: Self::Repr;
 
@@ -50,7 +130,16 @@ pub trait FpBackend {
     fn sub(a: Self::Repr, b: Self::Repr) -> Self::Repr;
     fn mul(a: Self::Repr, b: Self::Repr) -> Self::Repr;
     fn neg(a: Self::Repr) -> Self::Repr;
-    fn inverse(a: Self::Repr) -> Self::Repr;
+    // Extended-GCD-based inversion by default (see gcd_inverse) -- far
+    // cheaper than Fermat's little theorem for wide moduli (e.g. ~450x for
+    // a 256-bit field, since GCD's cost tracks the operand's bit-pattern
+    // rather than a full modular exponentiation). Backends with a cheaper
+    // option (e.g. WideArithmeticBackend/MontWideBackend's fermat_inverse
+    // for machine-word fields) override this.
+    fn inverse(a: Self::Repr) -> Self::Repr {
+        assert!(a != Self::Repr::ZERO, "cannot invert zero in a field");
+        gcd_inverse(a, Self::MODULUS)
+    }
     // The multiplicative identity in this backend's representation
     // (plain 1 for DefaultBackend, R mod MODULUS for MontBackend).
     fn one() -> Self::Repr;
@@ -66,8 +155,11 @@ pub trait FpBackend {
 // without overflow before reducing back down. Not "native machine int"
 // specific by design -- a bigint type with a double-width counterpart
 // (e.g. U256 with U512) can satisfy this same contract, so backends built
-// on it aren't tied to primitive integers only.
-pub trait WideInt: FpRepr {
+// on it aren't tied to primitive integers only. Also EuclideanRepr so
+// WideArithmeticBackend/MontWideBackend's Repr satisfies FpBackend::Repr's
+// bound even though both backends override `inverse` with fermat_inverse
+// instead of using the EuclideanRepr-driven default.
+pub trait WideInt: FpRepr + EuclideanRepr {
     type Wide: Copy + PartialOrd + Add<Output = Self::Wide> + Sub<Output = Self::Wide> + Shr<usize, Output = Self::Wide>;
 
     // Bit width of Self (so R = 2^BITS for Montgomery-style backends).
@@ -113,6 +205,32 @@ impl_wide_int!(u16 => u32);
 impl_wide_int!(u32 => u64);
 impl_wide_int!(u64 => u128);
 
+// a^(MODULUS-2) mod p via square-and-multiply -- Fermat's little theorem.
+// Same loop shape as Fp::pow below, but operating on the raw Repr since
+// FpBackend::inverse is called before an Fp<B> value exists to invoke
+// .pow() on. Opt-in alternative to the EuclideanRepr-driven GCD default:
+// cheap and simple for a machine-word modulus (small fixed iteration
+// count), unlike the ~450x-slower Fermat exponentiation a wide (e.g.
+// 256-bit) modulus would need -- see gcd_inverse's doc comment.
+pub fn fermat_inverse<B: FpBackend>(a: B::Repr) -> B::Repr
+where
+    B::Repr: WideInt,
+{
+    let mut result = B::one();
+    let mut base = a;
+    let mut e = B::Repr::narrow(B::MODULUS.widen() - B::Repr::from_u8(2).widen());
+
+    while e != B::Repr::ZERO {
+        if e.bit(0) {
+            result = B::mul(result, base);
+        }
+        base = B::square(base);
+        e >>= 1;
+    }
+
+    result
+}
+
 // Small fields (representable in a single machine word) share the same
 // add/sub/neg/inverse shape; only the multiplication reduction differs
 // enough per-field to be worth hand-optimizing (e.g. Goldilocks' epsilon
@@ -155,23 +273,12 @@ impl<T: WideFieldConfig> FpBackend for WideArithmeticBackend<T> {
         if a == T::Repr::ZERO { T::Repr::ZERO } else { T::Repr::narrow(Self::MODULUS.widen() - a.widen()) }
     }
 
-    // Fermat's little theorem: a^(p-2) == a^-1 (mod p).
+    // Fermat's little theorem instead of the EuclideanRepr-driven GCD
+    // default -- cheap and simple at machine-word size (see
+    // fermat_inverse's doc comment).
     fn inverse(a: T::Repr) -> T::Repr {
         assert!(a != T::Repr::ZERO, "cannot invert zero in a field");
-
-        let mut result = T::Repr::from_u8(1);
-        let mut base = a;
-        let mut e = T::Repr::narrow(Self::MODULUS.widen() - T::Repr::from_u8(2).widen());
-
-        while e != T::Repr::ZERO {
-            if e.bit(0) {
-                result = Self::mul(result, base);
-            }
-            base = Self::square(base);
-            e >>= 1;
-        }
-
-        result
+        fermat_inverse::<Self>(a)
     }
 
     fn one() -> T::Repr {
@@ -450,26 +557,15 @@ impl<T: MontFieldConfig> FpBackend for MontWideBackend<T> {
         if a == T::Repr::ZERO { T::Repr::ZERO } else { T::Repr::narrow(Self::MODULUS.widen() - a.widen()) }
     }
 
-    // Fermat's little theorem, carried out entirely in Montgomery form:
-    // Montgomery multiplication is a ring isomorphism, so repeated
-    // Self::mul/Self::square on Montgomery-form values computes
-    // (a^e)_mont directly, with no to_mont/from_mont round-trip needed.
+    // Fermat's little theorem instead of the EuclideanRepr-driven GCD
+    // default, same as WideArithmeticBackend (see fermat_inverse's doc
+    // comment). Carried out entirely in Montgomery form for free: Montgomery
+    // multiplication is a ring isomorphism, so fermat_inverse's repeated
+    // Self::mul/Self::square on Montgomery-form values computes (a^e)_mont
+    // directly, with no to_mont/from_mont round-trip needed.
     fn inverse(a: T::Repr) -> T::Repr {
         assert!(a != T::Repr::ZERO, "cannot invert zero in a field");
-
-        let mut result = Self::one();
-        let mut base = a;
-        let mut e = T::Repr::narrow(Self::MODULUS.widen() - T::Repr::from_u8(2).widen());
-
-        while e != T::Repr::ZERO {
-            if e.bit(0) {
-                result = Self::mul(result, base);
-            }
-            base = Self::square(base);
-            e >>= 1;
-        }
-
-        result
+        fermat_inverse::<Self>(a)
     }
 
     fn one() -> T::Repr {
@@ -648,5 +744,82 @@ impl<B: FpBackend> Frobenius for Fp<B> {
     // Fermat's little theorem: a^p == a (mod p) for every a in Fp.
     fn frobenius(self) -> Self {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Ported from bigint::math's retired extended_gcd/mod_inv tests (now
+    // that gcd_inverse lives here and is generic over EuclideanRepr instead
+    // of hardcoded to Uint<N>) -- same known-answer vectors, run over u32.
+    #[test]
+    fn mod_inv_3_11() {
+        assert_eq!(gcd_inverse(3u32, 11), 4);
+    }
+
+    #[test]
+    fn mod_inv_one() {
+        assert_eq!(gcd_inverse(1u32, 7), 1);
+    }
+
+    #[test]
+    fn mod_inv_rsa_example() {
+        // e = 17, phi = 3120 -> d = 2753 (17 * 2753 = 46801 = 15*3120 + 1)
+        assert_eq!(gcd_inverse(17u32, 3120), 2753);
+    }
+
+    #[test]
+    fn mod_inv_reduces_a_greater_than_n() {
+        // 40 mod 7 = 5, and 5 * 3 = 15 = 1 mod 7
+        assert_eq!(gcd_inverse(40u32, 7), 3);
+    }
+
+    fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+        while b != 0 {
+            let t = b;
+            b = a % b;
+            a = t;
+        }
+        a
+    }
+
+    proptest! {
+        #[test]
+        fn gcd_inverse_is_multiplicative_inverse(a in 1u32.., n in 2u32..) {
+            prop_assume!(gcd_u32(a, n) == 1);
+
+            let inv = gcd_inverse(a % n, n);
+
+            prop_assert!(inv < n);
+            prop_assert_eq!((a as u64 * inv as u64) % (n as u64), 1);
+        }
+    }
+
+    // Toy field (mod 97, u32) purely to compare the two inversion
+    // algorithms against each other -- field-core can't depend on
+    // babybear/goldilocks/mersenne31 (they depend on it, not the other way
+    // around), so this stands in for "a real WideArithmeticBackend".
+    struct Mod97;
+    impl WideFieldConfig for Mod97 {
+        type Repr = u32;
+
+        const MODULUS: u32 = 97;
+
+        fn mul(a: u32, b: u32) -> u32 {
+            ((a as u64 * b as u64) % 97) as u32
+        }
+    }
+    type B97 = WideArithmeticBackend<Mod97>;
+
+    proptest! {
+        // WideArithmeticBackend::inverse (Fermat, via fermat_inverse) must
+        // agree with the EuclideanRepr-driven GCD default it opts out of.
+        #[test]
+        fn fermat_inverse_matches_gcd_inverse(a in 1u32..97) {
+            prop_assert_eq!(B97::inverse(a), gcd_inverse(a, B97::MODULUS));
+        }
     }
 }
