@@ -1,27 +1,20 @@
 // Exactly one scalar-mul-* feature selects, at compile time, which
 // algorithm every point type's Mul<R> impl uses -- see each point type's
-// three cfg-gated `impl Mul<R>` blocks (e.g. short_weierstrass.rs) and
-// ladder.rs for the shared constant-time/variable-time helpers.
-#[cfg(not(any(
-    feature = "scalar-mul-double-and-add",
-    feature = "scalar-mul-ladder-variable",
-    feature = "scalar-mul-ladder-constant"
-)))]
+// two cfg-gated `impl Mul<R>` blocks (e.g. short_weierstrass.rs) and
+// ladder.rs for the shared constant-time cswap/select helpers.
+#[cfg(not(any(feature = "scalar-mul-variable-time", feature = "scalar-mul-constant-time")))]
 compile_error!(
-    "exactly one of the `scalar-mul-double-and-add`, `scalar-mul-ladder-variable`, or \
-     `scalar-mul-ladder-constant` features must be enabled -- none is"
+    "exactly one of the `scalar-mul-variable-time` or `scalar-mul-constant-time` features must \
+     be enabled -- neither is"
 );
 
-#[cfg(any(
-    all(feature = "scalar-mul-double-and-add", feature = "scalar-mul-ladder-variable"),
-    all(feature = "scalar-mul-double-and-add", feature = "scalar-mul-ladder-constant"),
-    all(feature = "scalar-mul-ladder-variable", feature = "scalar-mul-ladder-constant")
-))]
+#[cfg(all(feature = "scalar-mul-variable-time", feature = "scalar-mul-constant-time"))]
 compile_error!(
-    "the `scalar-mul-double-and-add`, `scalar-mul-ladder-variable`, and \
-     `scalar-mul-ladder-constant` features are mutually exclusive -- more than one is enabled"
+    "the `scalar-mul-variable-time` and `scalar-mul-constant-time` features are mutually \
+     exclusive -- both are enabled"
 );
 
+#[cfg(feature = "scalar-mul-constant-time")]
 mod ladder;
 
 mod short_weierstrass;

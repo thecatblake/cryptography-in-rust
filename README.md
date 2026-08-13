@@ -108,7 +108,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Advanced Scalar Multiplication
 
-* [x] Montgomery ladder (constant-time and variable-time, plus the original double-and-add, selected at compile time via `elliptic-curve`'s mutually-exclusive `scalar-mul-double-and-add` / `scalar-mul-ladder-variable` / `scalar-mul-ladder-constant` Cargo features)
+* [x] Montgomery ladder, constant-time, selected at compile time alongside the original double-and-add via `elliptic-curve`'s mutually-exclusive `scalar-mul-variable-time` (default) / `scalar-mul-constant-time` Cargo features
 * [ ] Windowed scalar multiplication
 * [ ] wNAF representation
 * [ ] GLV endomorphism decomposition (secp256k1, BLS12-381)
@@ -513,7 +513,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] Ethereum `execution-spec-tests` as fixtures
 * [ ] Ethereum `consensus-spec-tests` as fixtures
 * [ ] Cross-check against `arkworks`, `blst`, `revm`, `geth`
-* [ ] Constant-Time Verification (`subtle`, branch-free select) -- the `scalar-mul-ladder-constant` feature gets the ladder's *shape* right (fixed iteration count, arithmetic `cswap` instead of branching on the coordinates) but still branches on the bit when turning it into a field element (see `elliptic-curve/src/ladder.rs`); closing that gap needs a `Field`-level branch-free select primitive, which is what this item is for
+* [ ] Constant-Time Verification (`subtle`, branch-free select) -- the `scalar-mul-constant-time` feature gets the ladder's *shape* right (fixed iteration count, arithmetic `cswap` instead of branching on the coordinates) but still branches on the bit when turning it into a field element (see `elliptic-curve/src/ladder.rs`); closing that gap needs a `Field`-level branch-free select primitive, which is what this item is for
 * [ ] `dudect` / statistical timing analysis
 * [ ] ◇ Formal verification of one field or curve routine (hacspec, Kani, Creusot)
 * [ ] Negative tests: malformed inputs, invalid points, subgroup attacks

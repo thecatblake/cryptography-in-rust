@@ -133,11 +133,11 @@ impl<C: ShortWeierstrassCurve> AffinePoint<C> {
 // access on its elements (same reason Fp::pow's exponent is B::Repr, not
 // Self), so there's no way to walk a C::Scalar's bits directly.
 //
-// This is the cheapest of the three scalar_mul strategies (elliptic-curve's
+// This is the cheaper of the two scalar_mul strategies (elliptic-curve's
 // Cargo.toml `scalar-mul-*` features select exactly one at compile time),
 // but both the number of additions and the branch taken each bit depend on
-// the scalar -- see the ladder variants below for the alternative.
-#[cfg(feature = "scalar-mul-double-and-add")]
+// the scalar -- see the constant-time ladder below for the alternative.
+#[cfg(feature = "scalar-mul-variable-time")]
 impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
@@ -160,47 +160,16 @@ impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     }
 }
 
-// Montgomery ladder, variable-time: maintains two accumulators r0 = k'*P,
-// r1 = (k'+1)*P (k' being the bits of the scalar processed so far), and
-// each iteration performs exactly one add and one double regardless of the
-// bit -- unlike double-and-add above, which skips the add on a zero bit.
-// Still "variable-time" in two ways double-and-add also is: the loop only
-// runs for the scalar's significant bits (via `ladder::bit_length`, itself
-// scalar-magnitude-dependent), and `cswap` below is a plain branch on the
-// secret bit. See the constant-time variant for the fix to both.
-#[cfg(feature = "scalar-mul-ladder-variable")]
-impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
-    type Output = Self;
-
-    fn mul(self, scalar: R) -> Self::Output {
-        let mut r0 = Self { x: self.x, y: self.y, infinity: true };
-        let mut r1 = self;
-
-        for i in (0..crate::ladder::bit_length(scalar)).rev() {
-            let bit = scalar.bit(i);
-
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-            let sum = r0 + r1;
-            r0 = r0 + r0;
-            r1 = sum;
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-        }
-
-        r0
-    }
-}
-
-// Montgomery ladder, constant-time: same r0/r1 invariant and per-bit
-// add-and-double as the variable-time ladder, but iterates a fixed
-// `R::BITS` positions regardless of the scalar's magnitude (leading zero
-// bits leave r0 = O, r1 = P unchanged, so this is still correct -- just
-// walks extra no-op iterations for small scalars), and swaps r0/r1 via
-// `cswap` (field arithmetic, see ladder.rs) instead of a branch on the bit.
-#[cfg(feature = "scalar-mul-ladder-constant")]
+// Montgomery ladder, constant-time: maintains two accumulators r0 = k'*P,
+// r1 = (k'+1)*P (k' being the bits of the scalar processed so far, from the
+// top down), each iteration performing exactly one add and one double
+// regardless of the bit -- unlike double-and-add above, which skips the
+// add on a zero bit. Iterates a fixed `R::BITS` positions regardless of the
+// scalar's magnitude (leading zero bits leave r0 = O, r1 = P unchanged, so
+// this is still correct -- just walks extra no-op iterations for small
+// scalars), and swaps r0/r1 via `cswap_affine` (field arithmetic, see
+// ladder.rs) instead of a branch on the bit.
+#[cfg(feature = "scalar-mul-constant-time")]
 impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
@@ -227,7 +196,7 @@ impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
 // via `ladder::select`/`select_bool` on each field instead of a branch on
 // `bit`, which is the constant-time ladder's whole point (see its doc
 // comment above).
-#[cfg(feature = "scalar-mul-ladder-constant")]
+#[cfg(feature = "scalar-mul-constant-time")]
 fn cswap_affine<C: ShortWeierstrassCurve>(
     bit: bool,
     a: AffinePoint<C>,
@@ -440,7 +409,7 @@ impl<C: ShortWeierstrassCurve> Add for JacobianPoint<C> {
 // rather than `self + self` (12M+4S) for the squaring step -- the whole
 // point of carrying Jacobian coordinates through scalar_mul instead of just
 // add. Same `scalar-mul-*` feature selection as AffinePoint's Mul<R> above.
-#[cfg(feature = "scalar-mul-double-and-add")]
+#[cfg(feature = "scalar-mul-variable-time")]
 impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for JacobianPoint<C> {
     type Output = Self;
 
@@ -461,41 +430,11 @@ impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for JacobianPoint<C> {
     }
 }
 
-// Montgomery ladder, variable-time -- same r0/r1 invariant and cswap-around-
-// double-and-add shape as AffinePoint's variable-time ladder above, but
-// routed through the dedicated `double` (4M+6S) instead of `self + self`
-// (12M+4S), same payoff as the double-and-add impl above.
-#[cfg(feature = "scalar-mul-ladder-variable")]
-impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for JacobianPoint<C> {
-    type Output = Self;
-
-    fn mul(self, scalar: R) -> Self::Output {
-        let mut r0 = Self::infinity();
-        let mut r1 = self;
-
-        for i in (0..crate::ladder::bit_length(scalar)).rev() {
-            let bit = scalar.bit(i);
-
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-            let sum = r0 + r1;
-            r0 = r0.double();
-            r1 = sum;
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-        }
-
-        r0
-    }
-}
-
 // Montgomery ladder, constant-time -- same fixed-width `R::BITS` loop and
 // arithmetic `cswap` (see ladder.rs) as AffinePoint's constant-time ladder
-// above, routed through `double` instead of `self + self` for the same
-// reason as the other two Mul<R> impls above.
-#[cfg(feature = "scalar-mul-ladder-constant")]
+// above, routed through the dedicated `double` (4M+6S) instead of
+// `self + self` (12M+4S), same payoff as the double-and-add impl above.
+#[cfg(feature = "scalar-mul-constant-time")]
 impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for JacobianPoint<C> {
     type Output = Self;
 
@@ -521,7 +460,7 @@ impl<C: ShortWeierstrassCurve, R: FpRepr> Mul<R> for JacobianPoint<C> {
 // Swaps (a, b) when bit is true via `ladder::select` on each coordinate --
 // no `infinity` bool to select here unlike AffinePoint's cswap, since
 // JacobianPoint folds infinity into Z == 0 rather than a separate flag.
-#[cfg(feature = "scalar-mul-ladder-constant")]
+#[cfg(feature = "scalar-mul-constant-time")]
 fn cswap_jacobian<C: ShortWeierstrassCurve>(
     bit: bool,
     a: JacobianPoint<C>,

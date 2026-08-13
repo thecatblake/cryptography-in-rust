@@ -112,8 +112,8 @@ impl<C: TwistedEdwardsCurve> Add for AffinePoint<C> {
 // time by elliptic-curve's Cargo.toml `scalar-mul-*` features, same as
 // every other point type's Mul<R> impl in this crate -- see
 // short_weierstrass.rs's AffinePoint Mul<R> impls for the full rationale
-// shared across all three variants below.
-#[cfg(feature = "scalar-mul-double-and-add")]
+// shared across both variants below.
+#[cfg(feature = "scalar-mul-variable-time")]
 impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
@@ -134,41 +134,11 @@ impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     }
 }
 
-// Montgomery ladder, variable-time -- see
-// short_weierstrass::AffinePoint's variable-time ladder impl for the full
-// rationale; identical shape here, just with Edwards' identity() in place
-// of the infinity-flagged accumulator start.
-#[cfg(feature = "scalar-mul-ladder-variable")]
-impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
-    type Output = Self;
-
-    fn mul(self, scalar: R) -> Self::Output {
-        let mut r0 = Self::identity();
-        let mut r1 = self;
-
-        for i in (0..crate::ladder::bit_length(scalar)).rev() {
-            let bit = scalar.bit(i);
-
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-            let sum = r0 + r1;
-            r0 = r0 + r0;
-            r1 = sum;
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-        }
-
-        r0
-    }
-}
-
 // Montgomery ladder, constant-time -- see
 // short_weierstrass::AffinePoint's constant-time ladder impl for the full
 // rationale; identical shape here, just with Edwards' identity() in place
 // of the infinity-flagged accumulator start.
-#[cfg(feature = "scalar-mul-ladder-constant")]
+#[cfg(feature = "scalar-mul-constant-time")]
 impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
@@ -195,7 +165,7 @@ impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
 // no bool flag to select here, since twisted Edwards' identity is a genuine
 // affine point rather than an out-of-band infinity marker (see
 // AffinePoint's doc comment above).
-#[cfg(feature = "scalar-mul-ladder-constant")]
+#[cfg(feature = "scalar-mul-constant-time")]
 fn cswap_affine<C: TwistedEdwardsCurve>(
     bit: bool,
     a: AffinePoint<C>,
@@ -359,7 +329,7 @@ impl<C: TwistedEdwardsCurve> Add for ExtendedPoint<C> {
 // carrying extended coordinates through scalar_mul instead of just add,
 // mirroring JacobianPoint::mul's reasoning. Same `scalar-mul-*` feature
 // selection as every other Mul<R> impl in this crate.
-#[cfg(feature = "scalar-mul-double-and-add")]
+#[cfg(feature = "scalar-mul-variable-time")]
 impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for ExtendedPoint<C> {
     type Output = Self;
 
@@ -380,41 +350,11 @@ impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for ExtendedPoint<C> {
     }
 }
 
-// Montgomery ladder, variable-time -- see
-// short_weierstrass::JacobianPoint's variable-time ladder impl for the full
-// rationale; identical shape here, routed through the dedicated `double`
-// for the same reason the double-and-add impl above is.
-#[cfg(feature = "scalar-mul-ladder-variable")]
-impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for ExtendedPoint<C> {
-    type Output = Self;
-
-    fn mul(self, scalar: R) -> Self::Output {
-        let mut r0 = Self::identity();
-        let mut r1 = self;
-
-        for i in (0..crate::ladder::bit_length(scalar)).rev() {
-            let bit = scalar.bit(i);
-
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-            let sum = r0 + r1;
-            r0 = r0.double();
-            r1 = sum;
-            if bit {
-                std::mem::swap(&mut r0, &mut r1);
-            }
-        }
-
-        r0
-    }
-}
-
 // Montgomery ladder, constant-time -- see
 // short_weierstrass::JacobianPoint's constant-time ladder impl for the full
 // rationale; identical shape here, routed through the dedicated `double`
 // for the same reason the double-and-add impl above is.
-#[cfg(feature = "scalar-mul-ladder-constant")]
+#[cfg(feature = "scalar-mul-constant-time")]
 impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for ExtendedPoint<C> {
     type Output = Self;
 
@@ -440,7 +380,7 @@ impl<C: TwistedEdwardsCurve, R: FpRepr> Mul<R> for ExtendedPoint<C> {
 // Swaps (a, b) when bit is true via `ladder::select` on each of the four
 // coordinates -- no bool flag to select, same reason as
 // twisted_edwards::AffinePoint's cswap above.
-#[cfg(feature = "scalar-mul-ladder-constant")]
+#[cfg(feature = "scalar-mul-constant-time")]
 fn cswap_extended<C: TwistedEdwardsCurve>(
     bit: bool,
     a: ExtendedPoint<C>,
