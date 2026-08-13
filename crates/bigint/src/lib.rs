@@ -104,6 +104,7 @@ impl<const N: usize> Uint<N> {
 
 impl<const N: usize> FpRepr for Uint<N> {
     const ZERO: Self = Self::ZERO;
+    const BITS: usize = N * 64;
 
     fn bit(&self, i: usize) -> bool {
         Uint::bit(self, i)

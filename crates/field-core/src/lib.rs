@@ -20,6 +20,15 @@ pub use fp12::{Fp12, Fp12Config};
 pub trait FpRepr: Copy + PartialEq + ShrAssign<usize> {
     const ZERO: Self;
 
+    // Total bit width of the representation (e.g. 64 for u64, 256 for
+    // bigint::U256), not the position of the highest set bit of any
+    // particular value. Lets a fixed-iteration-count scalar walk (e.g. a
+    // constant-time Montgomery ladder) loop over every possible bit
+    // position regardless of the scalar's actual magnitude, instead of
+    // scanning for the highest set bit first -- that scan is itself a
+    // scalar-dependent, variable-time operation.
+    const BITS: usize;
+
     fn bit(&self, i: usize) -> bool;
 }
 
@@ -27,6 +36,7 @@ macro_rules! impl_fp_repr {
     ($repr:ty) => {
         impl FpRepr for $repr {
             const ZERO: Self = 0;
+            const BITS: usize = <$repr>::BITS as usize;
 
             fn bit(&self, i: usize) -> bool {
                 (self >> i) & 1 == 1
@@ -162,9 +172,6 @@ pub trait FpBackend {
 pub trait WideInt: FpRepr + EuclideanRepr {
     type Wide: Copy + PartialOrd + Add<Output = Self::Wide> + Sub<Output = Self::Wide> + Shr<usize, Output = Self::Wide>;
 
-    // Bit width of Self (so R = 2^BITS for Montgomery-style backends).
-    const BITS: usize;
-
     fn widen(self) -> Self::Wide;
     fn narrow(wide: Self::Wide) -> Self;
     fn wide_mul(self, other: Self) -> Self::Wide;
@@ -178,8 +185,6 @@ macro_rules! impl_wide_int {
     ($repr:ty => $wide:ty) => {
         impl WideInt for $repr {
             type Wide = $wide;
-
-            const BITS: usize = <$repr>::BITS as usize;
 
             fn widen(self) -> $wide {
                 self as $wide

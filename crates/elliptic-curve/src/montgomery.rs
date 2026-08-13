@@ -129,7 +129,12 @@ impl<C: MontgomeryCurve> AffinePoint<C> {
 // Scalar multiplication by double-and-add, same structure as
 // short_weierstrass::AffinePoint's Mul<R> impl: "double" takes the place
 // of Fp::pow's "square" and point "add" takes the place of field "mul",
-// walking the scalar's bits from least to most significant.
+// walking the scalar's bits from least to most significant. Selected at
+// compile time by elliptic-curve's Cargo.toml `scalar-mul-*` features, same
+// as every other point type's Mul<R> impl in this crate -- see
+// short_weierstrass.rs's AffinePoint Mul<R> impls for the full rationale
+// shared across all three variants below.
+#[cfg(feature = "scalar-mul-double-and-add")]
 impl<C: MontgomeryCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
     type Output = Self;
 
@@ -150,6 +155,83 @@ impl<C: MontgomeryCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
 
         result
     }
+}
+
+// Montgomery ladder, variable-time -- see
+// short_weierstrass::AffinePoint's variable-time ladder impl for the full
+// rationale; identical shape here. (Note: "Montgomery ladder" is the
+// algorithm's name, unrelated to the Montgomery *curve* form this file
+// happens to implement -- the same ladder is used verbatim for
+// short-Weierstrass and twisted-Edwards points elsewhere in this crate.)
+#[cfg(feature = "scalar-mul-ladder-variable")]
+impl<C: MontgomeryCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
+    type Output = Self;
+
+    fn mul(self, scalar: R) -> Self::Output {
+        let mut r0 = Self { x: self.x, y: self.y, infinity: true };
+        let mut r1 = self;
+
+        for i in (0..crate::ladder::bit_length(scalar)).rev() {
+            let bit = scalar.bit(i);
+
+            if bit {
+                std::mem::swap(&mut r0, &mut r1);
+            }
+            let sum = r0 + r1;
+            r0 = r0 + r0;
+            r1 = sum;
+            if bit {
+                std::mem::swap(&mut r0, &mut r1);
+            }
+        }
+
+        r0
+    }
+}
+
+// Montgomery ladder, constant-time -- see
+// short_weierstrass::AffinePoint's constant-time ladder impl for the full
+// rationale; identical shape here.
+#[cfg(feature = "scalar-mul-ladder-constant")]
+impl<C: MontgomeryCurve, R: FpRepr> Mul<R> for AffinePoint<C> {
+    type Output = Self;
+
+    fn mul(self, scalar: R) -> Self::Output {
+        let mut r0 = Self { x: self.x, y: self.y, infinity: true };
+        let mut r1 = self;
+
+        for i in (0..R::BITS).rev() {
+            let bit = scalar.bit(i);
+
+            let (a0, a1) = cswap(bit, r0, r1);
+            let sum = a0 + a1;
+            let dbl = a0 + a0;
+            let (b0, b1) = cswap(bit, dbl, sum);
+            r0 = b0;
+            r1 = b1;
+        }
+
+        r0
+    }
+}
+
+// Swaps (a, b) when bit is true via `ladder::select`/`select_bool` on each
+// field -- same reasoning as short_weierstrass::AffinePoint's cswap above,
+// since this type carries the same x/y/infinity shape.
+#[cfg(feature = "scalar-mul-ladder-constant")]
+fn cswap<C: MontgomeryCurve>(bit: bool, a: AffinePoint<C>, b: AffinePoint<C>) -> (AffinePoint<C>, AffinePoint<C>) {
+    let out_a = AffinePoint {
+        x: crate::ladder::select(bit, a.x, b.x),
+        y: crate::ladder::select(bit, a.y, b.y),
+        infinity: crate::ladder::select_bool(bit, a.infinity, b.infinity),
+    };
+    let out_b = AffinePoint {
+        x: crate::ladder::select(bit, b.x, a.x),
+        y: crate::ladder::select(bit, b.y, a.y),
+        infinity: crate::ladder::select_bool(bit, b.infinity, a.infinity),
+    };
+
+    (out_a, out_b)
 }
 
 #[cfg(test)]

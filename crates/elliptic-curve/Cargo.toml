@@ -4,6 +4,22 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["scalar-mul-double-and-add"]
+# Plain double-and-add: cheapest to compute, but the number of point
+# additions (and the branch taken each bit) depends on the scalar's bits.
+scalar-mul-double-and-add = []
+# Montgomery ladder, variable-time: uniform 1-add-1-double shape per bit
+# like the constant-time ladder below, but only walks the scalar's
+# significant bits and swaps the two accumulators via a plain branch, so
+# both the loop bound and the branch still depend on the scalar.
+scalar-mul-ladder-variable = []
+# Montgomery ladder, constant-time: walks every bit position up to the
+# scalar type's full width regardless of the scalar's magnitude, and swaps
+# the two accumulators via field arithmetic (see ladder.rs) instead of a
+# branch on the secret bit.
+scalar-mul-ladder-constant = []
+
 [dependencies]
 field-core = { path = "../field-core" }
 
