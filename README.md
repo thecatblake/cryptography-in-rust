@@ -95,7 +95,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 ## Coordinate Systems
 
 * [ ] Projective coordinates
-* [ ] Jacobian coordinates
+* [x] Jacobian coordinates (short Weierstrass: inversion-free add/double, `to_affine`/`from_affine`, on-curve validation)
 * [ ] Extended twisted Edwards coordinates
 * [ ] Cost comparison table (M/S/A counts per operation)
 
