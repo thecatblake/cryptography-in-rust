@@ -96,7 +96,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 * [ ] Projective coordinates
 * [x] Jacobian coordinates (short Weierstrass: inversion-free add/double, `to_affine`/`from_affine`, on-curve validation)
-* [ ] Extended twisted Edwards coordinates
+* [x] Extended twisted Edwards coordinates (unified add + dedicated double, `to_affine`/`from_affine`, on-curve validation)
 * [ ] Cost comparison table (M/S/A counts per operation)
 
 ## Curve Forms
