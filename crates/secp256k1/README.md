@@ -10,8 +10,9 @@ The secp256k1 short Weierstrass curve (`y² = x³ + 7`), built on `elliptic-curv
 * `Secp256k1Point`: `JacobianPoint<Secp256k1>` -- the crate's primary point representation. `add`/`double`/`scalar_mul` are all inversion-free here, unlike affine (see Benchmark Results below), so this is the type to reach for unless you specifically need affine's canonical `(x, y)` form.
 * `Secp256k1AffinePoint`: `AffinePoint<Secp256k1>`, for interop / serialization / equality checks -- Jacobian's `(X, Y, Z)` isn't unique per point, so converting to affine (`Secp256k1Point::to_affine`) is how you get a canonical, comparable representation back.
 * `SECP256K1_P`: the base field modulus, exposed directly.
+* `G`: the generator point (`Secp256k1AffinePoint`), the base point of the order-`n` subgroup. Convert via `Secp256k1Point::from_affine(G)` for scalar multiplication.
 
-No generator point, serialization, or subgroup check yet — see the root [README](../../README.md)'s "Named Curves" checklist for what's still open.
+No serialization or public-key derivation helpers yet — see the root [README](../../README.md)'s "Named Curves" checklist for what's still open.
 
 ## The base field's fast reduction
 

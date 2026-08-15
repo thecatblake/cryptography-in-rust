@@ -112,6 +112,30 @@ impl ShortWeierstrassCurve for Secp256k1 {
 pub type Secp256k1Point = JacobianPoint<Secp256k1>;
 pub type Secp256k1AffinePoint = AffinePoint<Secp256k1>;
 
+// The generator point G, the base point of secp256k1's prime-order (n)
+// subgroup -- every public key is G scaled by some private scalar. Standard
+// coordinates, e.g. SEC2 2.7.1:
+//   Gx = 79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+//   Gy = 483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8
+// Affine, not Secp256k1Point, since a fixed generator is naturally
+// canonical/constant data -- convert via Secp256k1Point::from_affine(G) to
+// get the faster Jacobian representation for actual scalar multiplication.
+pub const G: Secp256k1AffinePoint = Secp256k1AffinePoint {
+    x: Secp256k1Field::new(U256::from_limbs([
+        0x59f2_815b_16f8_1798,
+        0x029b_fcdb_2dce_28d9,
+        0x55a0_6295_ce87_0b07,
+        0x79be_667e_f9dc_bbac,
+    ])),
+    y: Secp256k1Field::new(U256::from_limbs([
+        0x9c47_d08f_fb10_d4b8,
+        0xfd17_b448_a685_5419,
+        0x5da4_fbfc_0e11_08a8,
+        0x483a_da77_26a3_c465,
+    ])),
+    infinity: false,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +257,21 @@ mod tests {
 
             prop_assert!((a * a.inverse()).value == U256::ONE);
         }
+    }
+
+    #[test]
+    fn generator_is_on_curve() {
+        assert!(G.validate());
+    }
+
+    #[test]
+    fn generator_has_order_n() {
+        // n*G must land back on the identity -- n is defined as the order
+        // of the subgroup G generates, so this is the defining property of
+        // n, not just a sanity check on G. Goes through Secp256k1Point
+        // (Jacobian) since that's what scalar_mul actually runs.
+        let ng = Secp256k1Point::from_affine(G) * ScalarConfig::MODULUS;
+
+        assert!(ng.to_affine() == Secp256k1AffinePoint { x: G.x, y: G.y, infinity: true });
     }
 }
