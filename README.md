@@ -350,8 +350,11 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] Storage / transaction / receipt tries
 * [ ] ABI encoding / decoding (static, dynamic, packed)
 * [ ] EIP-712 typed structured data hashing
-* [ ] ◇ Verkle trees + Banderwagon / IPA
-* [ ] ◇ Binary trie with Poseidon (the alternative proposal)
+* [ ] ◇ Verkle trees + Banderwagon / IPA *(as of March 2026 no longer the leading candidate — core devs are pivoting toward the binary state tree below, largely over Verkle's elliptic-curve/quantum exposure; still worth implementing for the vector-commitment math itself)*
+* [ ] Binary state tree (EIP-7864) with a hash-based commitment (Blake3 or a Poseidon variant) ⚑ *(current front-runner to replace the hexary Keccak MPT — see `Ethereum-roadmap.md` §5; ~4x shorter Merkle branches than today's MPT, no elliptic-curve dependency)*
+* [ ] Block-Level Access Lists (BALs, EIP-7928) — per-block map of state accesses/post-state values enabling parallel execution and executionless sync; Glamsterdam headliner
+* [ ] History expiry (EIP-4444 / EIP-7642) — pruning pre-Merge history from local storage; partially live since July 2025, required by Fusaka
+* [ ] State expiry (rent- or time-based inactive-state removal) — research phase, see `Ethereum-roadmap.md` §6
 
 ## Accounts & Transactions
 
@@ -362,8 +365,9 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] EIP-2930 (access lists)
 * [ ] EIP-1559 (fee market, base fee calculation)
 * [ ] EIP-4844 (blob transactions)
-* [ ] EIP-7702 (set EOA code)
+* [ ] EIP-7702 (set EOA code) *(live on mainnet since Pectra, 2025-05-07)*
 * [ ] ◇ ERC-4337 UserOperation validation
+* [ ] EIP-8141 native account abstraction ⚑ *(Hegotá candidate, ~2027 — the planned vehicle for per-account "signature agility," i.e. migrating individual accounts to post-quantum signatures without a protocol-wide cutover; see `Ethereum-roadmap.md` §7/§9)*
 * [ ] BIP-32 / BIP-39 / BIP-44 key derivation
 * [ ] Keystore (Web3 Secret Storage) encrypt / decrypt
 
@@ -381,6 +385,9 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] State transition function
 * [ ] Block and header validation
 * [ ] Withdrawal processing
+* [ ] Gas-limit / DoS-hardening EIP cluster (Fusaka, live): transaction gas cap (EIP-7825), `MODEXP` repricing (EIP-7883), RLP block-size cap (EIP-7934), default gas-limit target (EIP-7935)
+* [ ] State gas repricing (Glamsterdam devnet): state-creation cost-per-byte reservoir (EIP-8037), state-access cost update (EIP-8038), intrinsic gas reduction for simple transfers (EIP-2780)
+* [ ] ◇ EVM replacement research: RISC-V (Vitalik's 3-stage proposal, precompiles → user contracts → EVM-as-contract) vs. WASM (Offchain Labs' counter-proposal) — speculative, no consensus yet, ties into the zkVM work in Phase 5
 
 ## Consensus Layer
 
@@ -393,7 +400,20 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] Casper FFG finality
 * [ ] Light client: sync committee proof verification
 * [ ] 4844 blobs: KZG commitment, versioned hash, blob proof verification
-* [ ] ◇ Data availability sampling / PeerDAS (EIP-7594)
+* [ ] Data availability sampling / PeerDAS (EIP-7594) ⚑ *(no longer optional/future — shipped live on mainnet with Fusaka, 2025-12-03; each node samples 1/8 of blob data, reconstructable from any 50%)*
+* [ ] Blob-Parameter-Only forks (EIP-7892) — lightweight mechanism to raise blob target/max between major upgrades, live since Fusaka
+* [ ] Enshrined Proposer-Builder Separation (ePBS, EIP-7732) ⚑ *(Glamsterdam headliner — enshrines the proposer/builder handoff, removing reliance on MEV-Boost-style relays; extends block propagation window 2s → ~9s)*
+* [ ] Fork-choice enforced Inclusion Lists (FOCIL, EIP-7805) ⚑ *(Hegotá consensus-layer headliner — committee-based forced transaction inclusion for censorship resistance, see `Ethereum-roadmap.md` §8)*
+* [ ] ◇ Exclude slashed validators from proposer duties (EIP-8045), exit/consolidation churn expansion (EIP-8061) — Glamsterdam devnet, network-resilience refinements
+
+## Post-Quantum Transition (Lean Ethereum) ⚑
+
+*Ethereum-specific, sits alongside the general Phase 8 lattice/PQ track — see `Ethereum-roadmap.md` §9. EF stood up a dedicated Post-Quantum Security team in January 2026; core infrastructure milestones target ~2029.*
+
+* [ ] leanXMSS — hash-based signature scheme slated to replace consensus-layer BLS signatures (BLS relies on pairings, which Shor's algorithm breaks)
+* [ ] leanVM — minimal zkVM that SNARK-aggregates leanXMSS signatures (~250x compression) to offset their much larger size (~3000 bytes vs. BLS's 96 bytes) versus BLS aggregation
+* [ ] Quantum-safe alternative to KZG blob commitments (STARK-based or lattice-based candidates, both still being researched for efficiency)
+* [ ] Track PQ migration milestones (informal I*/J*/L*/M* naming): PQ key registry → PQ signature-verification precompiles → PQ attestations via leanVM → full PQ signature aggregation + PQ-safe blob commitments
 
 ## Networking ◇
 
@@ -474,6 +494,8 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 # Phase 8 — Lattices & Post-Quantum ◇
 
 *Parallel track. Kyber and Dilithium are more approachable than Halo2 — precise specs, exhaustive test vectors, and NTT is close to work already done in Phase 5.*
+
+*Priority note: Ethereum's own "Lean Ethereum" PQ migration (see Phase 6's Post-Quantum Transition section and `Ethereum-roadmap.md` §9) leans on hash-based signatures (leanXMSS, built on XMSS below) rather than lattice schemes for the consensus layer — that raises this phase's relevance sooner than "parallel track, whenever" suggests, at least for the XMSS/SLH-DSA hash-based items.*
 
 ## Foundations
 
