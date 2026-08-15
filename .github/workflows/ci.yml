@@ -23,4 +23,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run tests for all crates
-        run: cargo test --workspace --all-features --verbose
+        run: cargo test --workspace --verbose
+
+      - name: Run elliptic-curve tests with scalar-mul-constant-time
+        run: cargo test -p elliptic-curve --no-default-features --features scalar-mul-constant-time --verbose
