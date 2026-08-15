@@ -649,6 +649,7 @@ dependencies = [
  "bigint",
  "elliptic-curve",
  "field",
+ "field-core",
  "proptest",
 ]
 

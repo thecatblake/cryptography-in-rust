@@ -291,6 +291,58 @@ impl<T: WideFieldConfig> FpBackend for WideArithmeticBackend<T> {
     }
 }
 
+// Same shape as WideArithmeticBackend -- identical add/sub/neg/one, and mul
+// still just forwards to T::mul -- but keeps FpBackend's default gcd_inverse
+// instead of overriding it with fermat_inverse. The right choice flips with
+// Repr's width: gcd_inverse is ~450x cheaper than Fermat for a wide (e.g.
+// 256-bit) modulus (see gcd_inverse's doc comment above), which is exactly
+// the case a WideFieldConfig over a bigint Repr (U256's Wide = U512, rather
+// than a primitive doubling like u64's Wide = u128) is for -- so this is
+// the natural pairing for those configs, letting the implementor supply
+// nothing but MODULUS and `mul` (the one routine worth hand-optimizing per
+// field, per WideFieldConfig's own doc comment) and inherit everything else,
+// including a correctly-wide add/sub even when MODULUS sits close to Repr's
+// full bit width (a plain same-width add could silently overflow there; the
+// widen()/narrow() round trip through Wide sidesteps that entirely).
+pub struct WideEuclideanBackend<T: WideFieldConfig>(PhantomData<T>);
+
+impl<T: WideFieldConfig> FpBackend for WideEuclideanBackend<T> {
+    type Repr = T::Repr;
+
+    const MODULUS: T::Repr = T::MODULUS;
+
+    fn add(a: T::Repr, b: T::Repr) -> T::Repr {
+        let sum = a.widen() + b.widen();
+        let modulus = Self::MODULUS.widen();
+
+        T::Repr::narrow(if sum >= modulus { sum - modulus } else { sum })
+    }
+
+    fn sub(a: T::Repr, b: T::Repr) -> T::Repr {
+        let a = a.widen();
+        let b = b.widen();
+
+        T::Repr::narrow(if a >= b { a - b } else { a + Self::MODULUS.widen() - b })
+    }
+
+    fn mul(a: T::Repr, b: T::Repr) -> T::Repr {
+        T::mul(a, b)
+    }
+
+    fn neg(a: T::Repr) -> T::Repr {
+        if a == T::Repr::ZERO { T::Repr::ZERO } else { T::Repr::narrow(Self::MODULUS.widen() - a.widen()) }
+    }
+
+    // No override: T::Repr: EuclideanRepr (via WideInt's supertrait bound),
+    // so FpBackend's default gcd_inverse applies directly -- see this
+    // struct's doc comment for why that's the right call here, unlike
+    // WideArithmeticBackend's fermat_inverse override just above.
+
+    fn one() -> T::Repr {
+        T::Repr::from_u8(1)
+    }
+}
+
 // A field represented via Montgomery (REDC) reduction instead of a native
 // reduction trick: values are stored as a*R mod MODULUS ("Montgomery
 // form"), and REDC undoes that scaling as a side effect of reducing a

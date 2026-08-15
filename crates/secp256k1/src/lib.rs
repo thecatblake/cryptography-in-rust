@@ -1,13 +1,14 @@
 use bigint::{U256, U512};
-use field::{DefaultBackend, Fp, FpConfig};
+use field::{DefaultBackend, FpConfig};
+use field_core::{Fp, WideEuclideanBackend, WideFieldConfig};
 
-pub use field::FpBackend;
+pub use field_core::{FpBackend, WideInt};
 
 pub use elliptic_curve::ShortWeierstrassCurve;
 
 // secp256k1's base field modulus, p = 2^256 - 2^32 - 977. Chosen (like
 // Goldilocks' 2^64 - 2^32 + 1) so that 2^256 collapses to a small constant
-// mod p, which FieldBackend::mul below exploits for a division-free
+// mod p, which FieldConfig::mul below exploits for a division-free
 // reduction -- see secp256k1_reduce512's doc comment.
 const SECP256K1_P: U256 = U256::from_limbs([
     0xffff_fffe_ffff_fc2f,
@@ -22,21 +23,16 @@ const SECP256K1_P: U256 = U256::from_limbs([
 const SECP256K1_C: U256 = U256::from_u64(0x1_0000_03D1);
 
 // x = x_hi*2^256 + x_lo == x_hi*C + x_lo (mod p), the same identity
-// Goldilocks' reduce128 exploits at 64 bits (field_core doesn't have a
-// WideFieldConfig/WideArithmeticBackend generic enough for this though --
-// it's built around WideInt's primitive-doubling pairs like u64/u128, and
-// U256 has no such native "next size up" -- so this backend is written
-// directly against U256/U512 instead of going through that trait).
-//
-// Unlike Goldilocks (where x_hi is at most 64 bits and a single fold
-// finishes the job), a 512-bit product's x_hi can itself be up to 256 bits
-// wide, so one fold only shrinks the value to roughly 257 bits rather than
-// fitting it in a single word. Folding repeatedly -- each time replacing the
-// bits above 255 with their product against the 33-bit C -- converges fast
-// regardless: the excess bit-width shrinks by roughly (256 - 33) bits per
-// iteration, reaching <=256 bits within a handful of folds for any input
-// under 2^512. A final comparison loop against MODULUS then canonicalizes
-// the (already tiny) excess above p.
+// Goldilocks' reduce128 exploits at 64 bits. Unlike Goldilocks (where x_hi
+// is at most 64 bits and a single fold finishes the job), a 512-bit
+// product's x_hi can itself be up to 256 bits wide, so one fold only
+// shrinks the value to roughly 257 bits rather than fitting it in a single
+// word. Folding repeatedly -- each time replacing the bits above 255 with
+// their product against the 33-bit C -- converges fast regardless: the
+// excess bit-width shrinks by roughly (256 - 33) bits per iteration,
+// reaching <=256 bits within a handful of folds for any input under 2^512.
+// A final comparison loop against MODULUS then canonicalizes the (already
+// tiny) excess above p.
 fn secp256k1_reduce512(x: U512) -> U256 {
     let mut acc = x;
 
@@ -55,68 +51,28 @@ fn secp256k1_reduce512(x: U512) -> U256 {
     result
 }
 
-// The base field backend: add/sub/neg/one mirror field::DefaultBackend
-// exactly (there's no special trick for those), but mul/square route every
-// product through secp256k1_reduce512 instead of a general U512 % U256
-// division -- the whole point of carrying a hand-written backend instead of
-// just using DefaultBackend<FieldConfig> like the scalar field below does.
-pub struct FieldBackend;
+// The base field's WideFieldConfig: only `mul` is hand-written (the fast
+// fold-based reduction above). add/sub/neg/one and the default square
+// (mul(a,a)) all come for free from WideEuclideanBackend below via U256's
+// WideInt impl (bigint) -- including a correctly-wide add/sub even though
+// MODULUS sits close to U256's full bit width, which a naive same-width add
+// would silently overflow (see WideEuclideanBackend's doc comment in
+// field-core). That's the whole payoff of routing through WideFieldConfig
+// here instead of hand-rolling every FpBackend method the way the scalar
+// field's DefaultBackend<ScalarConfig> below has to.
+pub struct FieldConfig;
 
-impl FpBackend for FieldBackend {
+impl WideFieldConfig for FieldConfig {
     type Repr = U256;
 
     const MODULUS: U256 = SECP256K1_P;
 
-    // p uses nearly the full 256-bit width (p = 2^256 - C for a tiny C), so
-    // unlike a small test modulus, two reduced operands (each < p) can sum
-    // to just over 2^256 -- plain U256 addition would silently wrap at the
-    // register boundary and lose that carry (Uint::add has no overflow
-    // signal), corrupting the result. Route through U512 instead, exactly
-    // like `mul` already has to for the same reason: there's headroom to
-    // hold the true sum before comparing against/subtracting MODULUS.
-    fn add(a: U256, b: U256) -> U256 {
-        let sum: U512 = a.resize() + b.resize();
-        let modulus: U512 = Self::MODULUS.resize();
-
-        (if sum >= modulus { sum - modulus } else { sum }).resize()
-    }
-
-    // Same overflow hazard as `add` on the `a < b` branch: a + MODULUS can
-    // exceed 2^256, so that intermediate also needs U512 headroom.
-    fn sub(a: U256, b: U256) -> U256 {
-        if a >= b {
-            a - b
-        } else {
-            let sum: U512 = a.resize() + Self::MODULUS.resize();
-            (sum - b.resize()).resize()
-        }
-    }
-
     fn mul(a: U256, b: U256) -> U256 {
         secp256k1_reduce512(a * b)
     }
-
-    fn neg(a: U256) -> U256 {
-        if a == U256::ZERO {
-            U256::ZERO
-        } else {
-            Self::MODULUS - a
-        }
-    }
-
-    // No override: U256 implements EuclideanRepr, so FpBackend's default
-    // extended-GCD `inverse` applies directly here -- same as
-    // field::DefaultBackend, and still far cheaper than Fermat's little
-    // theorem at 256 bits (see gcd_inverse's doc comment in field-core).
-
-    fn one() -> U256 {
-        U256::ONE
-    }
-
-    fn square(a: U256) -> U256 {
-        secp256k1_reduce512(a.square())
-    }
 }
+
+pub type FieldBackend = WideEuclideanBackend<FieldConfig>;
 
 // secp256k1's group order n, i.e. the size of the prime-order subgroup
 // generated by G. Scalars for scalar multiplication live in this field, not

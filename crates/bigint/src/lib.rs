@@ -2,7 +2,7 @@ use std::ops::{Index, Add, Sub, Mul, Div, Rem, AddAssign, SubAssign, Shl, ShlAss
 
 use std::cmp::Ordering;
 
-use field_core::{EuclideanRepr, FpRepr};
+use field_core::{EuclideanRepr, FpRepr, WideInt};
 
 pub mod math;
 
@@ -280,6 +280,35 @@ impl U256 {
         }
 
         result
+    }
+}
+
+// Only U256 gets this (not a blanket impl over Uint<N>): stable Rust has no
+// const-generic arithmetic to spell "the double-width Uint<2*N>" generically,
+// so each doubling pair is written out by hand -- same reasoning as U256's
+// own Mul/square impls above, and the same pattern field-core's
+// impl_wide_int! macro follows for primitive pairs (u64 => u128, etc). This
+// is what lets a WideFieldConfig (field-core) be implemented directly on
+// U256, e.g. for a 256-bit prime with a fast reduction trick: add/sub/neg
+// come out of WideEuclideanBackend for free via the widen()/narrow() round
+// trip through U512, and the implementor only has to write `mul`.
+impl WideInt for U256 {
+    type Wide = U512;
+
+    fn widen(self) -> U512 {
+        self.resize()
+    }
+
+    fn narrow(wide: U512) -> U256 {
+        wide.resize()
+    }
+
+    fn wide_mul(self, other: U256) -> U512 {
+        self * other
+    }
+
+    fn from_u8(v: u8) -> U256 {
+        U256::from_u64(v as u64)
     }
 }
 
