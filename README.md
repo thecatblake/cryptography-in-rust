@@ -117,7 +117,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Named Curves
 
-* [ ] secp256k1
+* [x] secp256k1
 * [ ] P-256
 * [ ] Curve25519 / Ed25519
 * [ ] BN254
