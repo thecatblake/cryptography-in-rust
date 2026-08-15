@@ -106,7 +106,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [x] Twisted Edwards point arithmetic (unified addition + double-and-add scalar multiplication; Ed25519 itself not wired up yet)
 * [ ] In-circuit friendly curves (Baby Jubjub, Jubjub, Grumpkin)
 
-## Advanced Scalar Multiplication
+## Advanced Scalar Multiplication (optional)
 
 * [x] Montgomery ladder, constant-time, selected at compile time alongside the original double-and-add via `elliptic-curve`'s mutually-exclusive `scalar-mul-variable-time` (default) / `scalar-mul-constant-time` Cargo features
 * [ ] Windowed scalar multiplication
@@ -114,14 +114,6 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] GLV endomorphism decomposition (secp256k1, BLS12-381)
 * [ ] Multi-Scalar Multiplication (Pippenger / bucket method) ⚑
 * [ ] Precomputed table generation
-
-## Hashing to Curves
-
-* [ ] Hash-to-field (RFC 9380)
-* [ ] Simplified SWU map
-* [ ] Elligator 2
-* [ ] Clearing the cofactor
-* [ ] Full `hash_to_curve` for BLS12-381 G1/G2
 
 ## Named Curves
 
@@ -173,6 +165,14 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] ◇ Monolith
 * [ ] ◇ Skyscraper
 * [ ] Sponge / duplex construction over a field
+
+## Hashing to Curves
+
+* [ ] Hash-to-field (RFC 9380)
+* [ ] Simplified SWU map
+* [ ] Elligator 2
+* [ ] Clearing the cofactor
+* [ ] Full `hash_to_curve` for BLS12-381 G1/G2
 
 ## Merkle Trees
 
