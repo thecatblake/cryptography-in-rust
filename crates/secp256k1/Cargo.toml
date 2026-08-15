@@ -12,3 +12,8 @@ elliptic-curve = { path = "../elliptic-curve" }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "secp256k1_ops"
+harness = false

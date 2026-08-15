@@ -4,28 +4,24 @@ use field_core::{Fp, WideEuclideanBackend, WideFieldConfig};
 
 pub use field_core::{FpBackend, WideInt};
 
-pub use elliptic_curve::ShortWeierstrassCurve;
+pub use elliptic_curve::{AffinePoint, JacobianPoint, ShortWeierstrassCurve};
 
-// secp256k1's base field modulus, p = 2^256 - 2^32 - 977. Chosen (like
-// Goldilocks' 2^64 - 2^32 + 1) so that 2^256 collapses to a small constant
-// mod p, which FieldConfig::mul below exploits for a division-free
-// reduction -- see secp256k1_reduce512's doc comment.
-const SECP256K1_P: U256 = U256::from_limbs([
+// secp256k1's base field modulus, p = 2^256 - 2^32 - 977 -- a Solinas-style
+// prime, chosen so that 2^256 collapses to a small constant mod p, which
+// FieldConfig::mul below exploits for a division-free reduction -- see
+// secp256k1_reduce512's doc comment.
+pub const SECP256K1_P: U256 = U256::from_limbs([
     0xffff_fffe_ffff_fc2f,
     0xffff_ffff_ffff_ffff,
     0xffff_ffff_ffff_ffff,
     0xffff_ffff_ffff_ffff,
 ]);
 
-// C = 2^32 + 977, i.e. p's "epsilon": 2^256 == C (mod p). The base field's
-// analogue of Goldilocks' EPSILON = 2^32 - 1 (2^64 == 2^32 - 1 mod p) --
-// same idea, just a different small constant for a different prime shape.
+// C = 2^32 + 977, i.e. p's "epsilon": 2^256 == C (mod p).
 const SECP256K1_C: U256 = U256::from_u64(0x1_0000_03D1);
 
-// x = x_hi*2^256 + x_lo == x_hi*C + x_lo (mod p), the same identity
-// Goldilocks' reduce128 exploits at 64 bits. Unlike Goldilocks (where x_hi
-// is at most 64 bits and a single fold finishes the job), a 512-bit
-// product's x_hi can itself be up to 256 bits wide, so one fold only
+// x = x_hi*2^256 + x_lo == x_hi*C + x_lo (mod p). x_hi can itself be up to
+// 256 bits wide (the top half of a 512-bit product), so one fold only
 // shrinks the value to roughly 257 bits rather than fitting it in a single
 // word. Folding repeatedly -- each time replacing the bits above 255 with
 // their product against the 33-bit C -- converges fast regardless: the
@@ -102,6 +98,19 @@ impl ShortWeierstrassCurve for Secp256k1 {
     const A: Self::Field = Secp256k1Field::new(U256::ZERO);
     const B: Self::Field = Secp256k1Field::new(U256::from_u64(7));
 }
+
+// Jacobian is this crate's primary point representation: add/double are
+// inversion-free (the one field inversion Jacobian coordinates need is
+// deferred to a single to_affine() call, instead of paid on every add/
+// double the way affine's chord-and-tangent formulas do), which benches out
+// to roughly 2.2x faster add, 6.9x faster double, and 7.3x faster
+// scalar_mul than AffinePoint<Secp256k1> (see README's Benchmark Results).
+// AffinePoint<Secp256k1> is still available directly (or as
+// Secp256k1AffinePoint below) for the cases that want it -- e.g.
+// serialization, or comparing two points, where Jacobian's non-unique
+// (X, Y, Z) representation is the wrong tool.
+pub type Secp256k1Point = JacobianPoint<Secp256k1>;
+pub type Secp256k1AffinePoint = AffinePoint<Secp256k1>;
 
 #[cfg(test)]
 mod tests {
