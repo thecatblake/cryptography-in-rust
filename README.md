@@ -121,7 +121,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] P-256
 * [ ] Curve25519 / Ed25519
 * [ ] BN254
-* [ ] BLS12-381
+* [ ] BLS12-381 G1 (short Weierstrass `y² = x³ + 4` over `F_p`; no twist, no pairing — see Phase 5 for G2 and the pairing itself)
 * [ ] Pasta curves (Pallas / Vesta) — 2-cycle
 * [ ] ◇ BLS12-377 / BW6-761
 
@@ -251,6 +251,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 * [ ] Miller Loop
 * [ ] Final Exponentiation
 * [ ] BN254 Pairing
+* [ ] BLS12-381 G2 (sextic twist over `F_{p^2}`, cofactor clearing) — prerequisite for the pairing below
 * [ ] BLS12-381 Pairing
 * [ ] Multi-pairing / batch pairing check
 * [ ] ◇ Optimal ate pairing optimizations
