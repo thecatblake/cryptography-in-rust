@@ -234,8 +234,8 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Polynomials
 
-* [ ] Polynomial Representation (coefficient form)
-* [ ] Polynomial Evaluation (Horner)
+* [x] Polynomial Representation (coefficient form)
+* [x] Polynomial Evaluation (Horner)
 * [ ] Polynomial arithmetic (add, mul, div, mod)
 * [ ] Polynomial Interpolation
 * [ ] Lagrange Basis
