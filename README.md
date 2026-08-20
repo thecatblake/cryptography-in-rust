@@ -190,7 +190,7 @@ The less you rely on AI, the slower your work becomes, but the more opportunitie
 
 ## Randomness
 
-* [ ] CSPRNG interface (`rand_core`-style traits)
+* [x] CSPRNG interface (`rand_core`-style traits)
 * [ ] Rejection sampling for uniform field elements
 * [ ] Deterministic nonce generation (RFC 6979)
 * [ ] Hash-to-field (RFC 9380)
